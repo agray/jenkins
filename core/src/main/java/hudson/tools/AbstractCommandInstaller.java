@@ -26,6 +26,7 @@ package hudson.tools;
 import hudson.FilePath;
 import hudson.model.Node;
 import hudson.model.TaskListener;
+import hudson.tasks.CommandInterpreter;
 import hudson.util.FormValidation;
 import java.io.IOException;
 import org.kohsuke.stapler.QueryParameter;
@@ -48,7 +49,7 @@ public abstract class AbstractCommandInstaller extends ToolInstaller {
 
     public AbstractCommandInstaller(String label, String command, String toolHome) {
         super(label);
-        this.command = fixCrLf(command);
+        this.command = command;
         this.toolHome = toolHome;
     }
 
@@ -70,10 +71,10 @@ public abstract class AbstractCommandInstaller extends ToolInstaller {
     @Override
     public FilePath performInstallation(ToolInstallation tool, Node node, TaskListener log) throws IOException, InterruptedException {
         FilePath dir = preferredLocation(tool, node);
-        // XXX support Windows batch scripts, Unix scripts with interpreter line, etc. (see CommandInterpreter subclasses)
+        // TODO support Unix scripts with interpreter line (see Shell.buildCommandLine)
         FilePath script = dir.createTextTempFile("hudson", getCommandFileExtension(), command);
         try {
-            String cmd[] = getCommandCall(script);
+            String[] cmd = getCommandCall(script);
             int r = node.createLauncher(log).launch().cmds(cmd).stdout(log).pwd(dir).join();
             if (r != 0) {
                 throw new IOException("Command returned status " + r);
@@ -84,20 +85,7 @@ public abstract class AbstractCommandInstaller extends ToolInstaller {
         return dir.child(getToolHome());
     }
 
-    /**
-     * Fix CR/LF and always make it Unix style.
-     */
-    //TODO: replace by a Windows style
-    private static String fixCrLf(String s) {
-        // eliminate CR
-        int idx;
-        while ((idx = s.indexOf("\r\n")) != -1) {
-            s = s.substring(0, idx) + s.substring(idx + 1);
-        }
-        return s;
-    }
-
-    public static abstract class Descriptor<TInstallerClass extends AbstractCommandInstaller>
+    public abstract static class Descriptor<TInstallerClass extends AbstractCommandInstaller>
             extends ToolInstallerDescriptor<TInstallerClass> {
 
         public FormValidation doCheckCommand(@QueryParameter String value) {
@@ -112,7 +100,7 @@ public abstract class AbstractCommandInstaller extends ToolInstaller {
             if (value.length() > 0) {
                 return FormValidation.ok();
             } else {
-                return FormValidation.error(Messages.CommandInstaller_no_command());
+                return FormValidation.error(Messages.CommandInstaller_no_toolHome());
             }
         }
     }

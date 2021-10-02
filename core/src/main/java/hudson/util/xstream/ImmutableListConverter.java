@@ -33,11 +33,10 @@ import com.thoughtworks.xstream.converters.reflection.ReflectionProvider;
 import com.thoughtworks.xstream.converters.reflection.SerializableConverter;
 import com.thoughtworks.xstream.io.HierarchicalStreamReader;
 import com.thoughtworks.xstream.mapper.Mapper;
-
 import hudson.util.RobustReflectionConverter;
-
 import java.util.ArrayList;
 import java.util.List;
+import jenkins.util.xstream.CriticalXStreamException;
 
 /**
  * {@link ImmutableList} should convert like a list, instead of via serialization.
@@ -76,12 +75,12 @@ public class ImmutableListConverter extends CollectionConverter {
 	                try {
 	                    Object item = readItem(reader, context, items);
 	                    items.add(item);
-	                } catch (XStreamException e) {
-	                    RobustReflectionConverter.addErrorInContext(context, e);
-	                } catch (LinkageError e) {
+	                } catch (CriticalXStreamException e) {
+	                    throw e;
+	                } catch (XStreamException | LinkageError e) {
 	                    RobustReflectionConverter.addErrorInContext(context, e);
 	                }
-	                reader.moveUp();
+                    reader.moveUp();
 	            }
 
                 // move back up past the elements element.

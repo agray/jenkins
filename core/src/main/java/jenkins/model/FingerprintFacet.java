@@ -23,13 +23,13 @@
  */
 package jenkins.model;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.ExtensionPoint;
 import hudson.model.Action;
 import hudson.model.Fingerprint;
+import java.util.List;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-
-import java.util.List;
 
 /**
  * Plugin-specific additions to fingerprint information.
@@ -48,8 +48,7 @@ import java.util.List;
  * an instance of new facet and add it.
  *
  * <h2>Views</h2>
- * <h4>main.groovy</h4>
- * <p>
+ * <h3>main.groovy</h3>
  * This view is rendered into the
  *
  * @author Kohsuke Kawaguchi
@@ -65,9 +64,9 @@ public abstract class FingerprintFacet implements ExtensionPoint {
      * @param fingerprint
      *      {@link Fingerprint} object to which this facet is going to be added to.
      * @param timestamp
-     *      Timestamp when the use happened.
+     *      Timestamp when the use happened (when the facet has been created).
      */
-    protected FingerprintFacet(Fingerprint fingerprint, long timestamp) {
+    protected FingerprintFacet(@NonNull Fingerprint fingerprint, long timestamp) {
         assert fingerprint!=null;
         this.fingerprint = fingerprint;
         this.timestamp = timestamp;
@@ -79,18 +78,20 @@ public abstract class FingerprintFacet implements ExtensionPoint {
      * @return
      *      always non-null.
      */
-    public Fingerprint getFingerprint() {
+    public @NonNull Fingerprint getFingerprint() {
         return fingerprint;
     }
 
     /**
      * Create action objects to be contributed to the owner {@link Fingerprint}.
-     *
+     * By default, creates no actions.
      * <p>
      * {@link Fingerprint} calls this method for every {@link FingerprintFacet} that
      * it owns when the rendering is requested.
+     * @param result Output list
      */
     public void createActions(List<Action> result) {
+        // Create no actions by default
     }
 
     /**
@@ -99,6 +100,15 @@ public abstract class FingerprintFacet implements ExtensionPoint {
      */
     public long getTimestamp() {
         return timestamp;
+    }
+
+    /**
+     * Returns whether Fingerprint deletion has been blocked by this Facet.
+     * Returns false by default. Override the default to block the deletion of the associated Fingerprint.
+     * @since 2.223
+     */
+    public boolean isFingerprintDeletionBlocked() {
+        return false;
     }
 
     /**

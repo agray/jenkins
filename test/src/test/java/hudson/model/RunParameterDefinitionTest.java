@@ -24,21 +24,20 @@
 
 package hudson.model;
 
+import static org.junit.Assert.assertEquals;
+
 import hudson.EnvVars;
-import static org.junit.Assert.*;
 import hudson.Launcher;
 import hudson.model.RunParameterDefinition.RunParameterFilter;
 import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Publisher;
 import hudson.util.LogTaskListener;
-
 import java.util.Collections;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
 import org.junit.Rule;
 import org.junit.Test;
-import org.jvnet.hudson.test.Bug;
+import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 import org.jvnet.hudson.test.MockFolder;
 
@@ -49,7 +48,17 @@ public class RunParameterDefinitionTest {
     @Rule
     public JenkinsRule j = new JenkinsRule();
 
-    @Bug(16462)
+    @Issue("JENKINS-31954")
+    @Test public void configRoundtrip() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject();
+        p.addProperty(new ParametersDefinitionProperty(new RunParameterDefinition("build", "p", "", RunParameterFilter.COMPLETED)));
+        j.configRoundtrip(p);
+        RunParameterDefinition rpd = (RunParameterDefinition) p.getProperty(ParametersDefinitionProperty.class).getParameterDefinition("build");
+        assertEquals("p", rpd.getProjectName());
+        assertEquals(RunParameterFilter.COMPLETED, rpd.getFilter());
+    }
+
+    @Issue("JENKINS-16462")
     @Test public void inFolders() throws Exception {
         MockFolder dir = j.createFolder("dir");
         MockFolder subdir = dir.createProject(MockFolder.class, "sub dir");
@@ -264,26 +273,24 @@ public class RunParameterDefinitionTest {
 
         private final Result result;
 
-        public ResultPublisher(Result result) {
+        ResultPublisher(Result result) {
             this.result = result;
         }
 
-        public @Override
-        boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) {
+        @Override
+        public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) {
             build.setResult(result);
             return true;
         }
 
+        @Override
         public BuildStepMonitor getRequiredMonitorService() {
             return BuildStepMonitor.NONE;
         }
 
+        @Override
         public Descriptor<Publisher> getDescriptor() {
-            return new Descriptor<Publisher>(ResultPublisher.class) {
-                public String getDisplayName() {
-                    return "ResultPublisher";
-                }
-            };
+            return new Descriptor<Publisher>(ResultPublisher.class) {};
         }
     }
 }

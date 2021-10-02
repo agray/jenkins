@@ -24,14 +24,14 @@
 package hudson.util;
 
 import java.io.FilterWriter;
-import java.io.Writer;
 import java.io.IOException;
+import java.io.Writer;
 
 /**
  * Finds the lone LF and converts that to CR+LF.
  *
  * <p>
- * Internet Explorer's <tt>XmlHttpRequest.responseText</tt> seems to
+ * Internet Explorer's {@code XmlHttpRequest.responseText} seems to
  * normalize the line end, and if we only send LF without CR, it will
  * not recognize that as a new line. To work around this problem,
  * we use this filter to always convert LF to CR+LF.
@@ -39,6 +39,7 @@ import java.io.IOException;
  * @author Kohsuke Kawaguchi
  * @deprecated since 2008-05-28. moved to stapler
  */
+@Deprecated
 public class LineEndNormalizingWriter extends FilterWriter {
 
     private boolean seenCR;
@@ -47,23 +48,27 @@ public class LineEndNormalizingWriter extends FilterWriter {
         super(out);
     }
 
-    public void write(char cbuf[]) throws IOException {
+    @Override
+    public void write(char[] cbuf) throws IOException {
         write(cbuf, 0, cbuf.length);
     }
 
+    @Override
     public void write(String str) throws IOException {
         write(str,0,str.length());
     }
 
+    @Override
     public void write(int c) throws IOException {
         if(!seenCR && c==LF)
             super.write("\r\n");
         else
             super.write(c);
-        seenCR = (c==CR);
+        seenCR = c == CR;
     }
 
-    public void write(char cbuf[], int off, int len) throws IOException {
+    @Override
+    public void write(char[] cbuf, int off, int len) throws IOException {
         int end = off+len;
         int writeBegin = off;
 
@@ -75,12 +80,13 @@ public class LineEndNormalizingWriter extends FilterWriter {
                 super.write("\r\n");
                 writeBegin=i+1;
             }
-            seenCR = (ch==CR);
+            seenCR = ch == CR;
         }
 
         super.write(cbuf,writeBegin,end-writeBegin);
     }
 
+    @Override
     public void write(String str, int off, int len) throws IOException {
         int end = off+len;
         int writeBegin = off;
@@ -93,7 +99,7 @@ public class LineEndNormalizingWriter extends FilterWriter {
                 super.write("\r\n");
                 writeBegin=i+1;
             }
-            seenCR = (ch==CR);
+            seenCR = ch == CR;
         }
 
         super.write(str,writeBegin,end-writeBegin);

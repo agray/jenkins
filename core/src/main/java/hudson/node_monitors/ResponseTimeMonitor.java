@@ -23,30 +23,28 @@
  */
 package hudson.node_monitors;
 
-import hudson.Util;
 import hudson.Extension;
-import hudson.slaves.OfflineCause;
 import hudson.model.Computer;
 import hudson.remoting.Callable;
-import net.sf.json.JSONObject;
-import org.kohsuke.stapler.StaplerRequest;
-
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.logging.Logger;
+import jenkins.security.MasterToSlaveCallable;
+import net.sf.json.JSONObject;
+import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.export.Exported;
 import org.kohsuke.stapler.export.ExportedBean;
 
 /**
- * Monitors the round-trip response time to this slave.
+ * Monitors the round-trip response time to this agent.
  *
  * @author Kohsuke Kawaguchi
  */
 public class ResponseTimeMonitor extends NodeMonitor {
     @Extension
     public static final AbstractNodeMonitorDescriptor<Data> DESCRIPTOR = new AbstractAsyncNodeMonitorDescriptor<Data>() {
+
         @Override
         protected Callable<Data,IOException> createCallable(Computer c) {
             return new Step1(get(c));
@@ -54,27 +52,34 @@ public class ResponseTimeMonitor extends NodeMonitor {
 
         @Override
         protected Map<Computer, Data> monitor() throws InterruptedException {
-            Map<Computer, Data> base = super.monitor();
-            for (Entry<Computer, Data> e : base.entrySet()) {
+            Result<Data> base = monitorDetailed();
+            Map<Computer, Data> monitoringData = base.getMonitoringData();
+            for (Map.Entry<Computer, Data> e : monitoringData.entrySet()) {
                 Computer c = e.getKey();
                 Data d = e.getValue();
+                if (base.getSkipped().contains(c)) {
+                    assert d == null;
+                    continue;
+                }
+
                 if (d ==null) {
                     // if we failed to monitor, put in the special value that indicates a failure
                     e.setValue(d=new Data(get(c),-1L));
                 }
 
                 if(d.hasTooManyTimeouts() && !isIgnored()) {
-                    // unlike other monitors whose failure still allow us to communicate with the slave,
+                    // unlike other monitors whose failure still allow us to communicate with the agent,
                     // the failure in this monitor indicates that we are just unable to make any requests
-                    // to this slave. So we should severe the connection, as opposed to marking it temporarily
+                    // to this agent. So we should severe the connection, as opposed to marking it temporarily
                     // off line, which still keeps the underlying channel open.
                     c.disconnect(d);
                     LOGGER.warning(Messages.ResponseTimeMonitor_MarkedOffline(c.getName()));
                 }
             }
-            return base;
+            return monitoringData;
         }
 
+        @Override
         public String getDisplayName() {
             return Messages.ResponseTimeMonitor_DisplayName();
         }
@@ -85,13 +90,14 @@ public class ResponseTimeMonitor extends NodeMonitor {
         }
     };
 
-    private static final class Step1 implements Callable<Data,IOException> {
+    private static final class Step1 extends MasterToSlaveCallable<Data,IOException> {
         private Data cur;
 
         private Step1(Data cur) {
             this.cur = cur;
         }
 
+        @Override
         public Data call() {
             // this method must be being invoked locally, which means the roundtrip time is zero and zero forever
             return new Data(cur,0);
@@ -104,14 +110,15 @@ public class ResponseTimeMonitor extends NodeMonitor {
         private static final long serialVersionUID = 1L;
     }
 
-    private static final class Step2 implements Callable<Step3,IOException> {
+    private static final class Step2 extends MasterToSlaveCallable<Step3,IOException> {
         private final Data cur;
         private final long start = System.currentTimeMillis();
 
-        public Step2(Data cur) {
+        Step2(Data cur) {
             this.cur = cur;
         }
 
+        @Override
         public Step3 call() {
             // this method must be being invoked locally, which means the roundtrip time is zero and zero forever
             return new Step3(cur,start);
@@ -131,7 +138,7 @@ public class ResponseTimeMonitor extends NodeMonitor {
 
         private Object readResolve() {
             long end = System.currentTimeMillis();
-            return new Data(cur,(end-start));
+            return new Data(cur, end - start);
         }
 
         private static final long serialVersionUID = 1L;
@@ -141,7 +148,7 @@ public class ResponseTimeMonitor extends NodeMonitor {
      * Immutable representation of the monitoring data.
      */
     @ExportedBean
-    public static final class Data extends OfflineCause implements Serializable {
+    public static final class Data extends MonitorOfflineCause implements Serializable {
         /**
          * Record of the past 5 times. -1 if time out. Otherwise in milliseconds.
          * Old ones first.
@@ -164,6 +171,7 @@ public class ResponseTimeMonitor extends NodeMonitor {
          */
         private int failureCount() {
             int cnt=0;
+            //noinspection StatementWithEmptyBody
             for(int i=past5.length-1; i>=0 && past5[i]<0; i--, cnt++)
                 ;
             return cnt;
@@ -187,20 +195,19 @@ public class ResponseTimeMonitor extends NodeMonitor {
         }
 
         /**
-         * HTML rendering of the data
+         * String rendering of the data
          */
         @Override
         public String toString() {
-//            StringBuilder buf = new StringBuilder();
-//            for (long l : past5) {
-//                if(buf.length()>0)  buf.append(',');
-//                buf.append(l);
-//            }
-//            return buf.toString();
             int fc = failureCount();
             if(fc>0)
-                return Util.wrapToErrorSpan(Messages.ResponseTimeMonitor_TimeOut(fc));
+                return Messages.ResponseTimeMonitor_TimeOut(fc);
             return getAverage()+"ms";
+        }
+
+        @Override
+        public Class<? extends NodeMonitor> getTrigger() {
+            return ResponseTimeMonitor.class;
         }
 
         private static final long serialVersionUID = 1L;

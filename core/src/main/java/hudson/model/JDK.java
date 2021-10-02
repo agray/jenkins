@@ -23,27 +23,31 @@
  */
 package hudson.model;
 
-import hudson.util.StreamTaskListener;
-import hudson.util.NullStream;
-import hudson.util.FormValidation;
-import hudson.Launcher;
-import hudson.Extension;
 import hudson.EnvVars;
+import hudson.Extension;
+import hudson.Launcher;
 import hudson.slaves.NodeSpecific;
-import hudson.tools.ToolInstallation;
 import hudson.tools.ToolDescriptor;
+import hudson.tools.ToolInstallation;
+import hudson.tools.ToolInstaller;
 import hudson.tools.ToolProperty;
-import hudson.tools.JDKInstaller;
+import hudson.util.FormValidation;
+import hudson.util.NullStream;
+import hudson.util.StreamTaskListener;
 import hudson.util.XStream2;
-
 import java.io.File;
 import java.io.IOException;
-import java.util.Map;
-import java.util.List;
+import java.lang.reflect.Constructor;
 import java.util.Arrays;
 import java.util.Collections;
-
+import java.util.List;
+import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
@@ -52,6 +56,23 @@ import org.kohsuke.stapler.DataBoundConstructor;
  * @author Kohsuke Kawaguchi
  */
 public final class JDK extends ToolInstallation implements NodeSpecific<JDK>, EnvironmentSpecific<JDK> {
+
+    /**
+     * Name of the “System JDK”, which is just the JDK on Jenkins' $PATH.
+     * @since 1.577
+     */
+    public static final String DEFAULT_NAME = "(System)";
+    private static final long serialVersionUID = -3318291200160313357L;
+
+    @Restricted(NoExternalUse.class)
+    public static boolean isDefaultName(String name) {
+        if ("(Default)".equals(name)) {
+            // DEFAULT_NAME took this value prior to 1.598.
+            return true;
+        }
+        return DEFAULT_NAME.equals(name) || name == null;
+    }
+
     /**
      * @deprecated since 2009-02-25
      */
@@ -59,7 +80,7 @@ public final class JDK extends ToolInstallation implements NodeSpecific<JDK>, En
     private transient String javaHome;
 
     public JDK(String name, String javaHome) {
-        super(name, javaHome, Collections.<ToolProperty<?>>emptyList());
+        super(name, javaHome, Collections.emptyList());
     }
 
     @DataBoundConstructor
@@ -73,6 +94,7 @@ public final class JDK extends ToolInstallation implements NodeSpecific<JDK>, En
      * @deprecated as of 1.304
      *      Use {@link #getHome()}
      */
+    @Deprecated
     public String getJavaHome() {
         return getHome();
     }
@@ -87,7 +109,7 @@ public final class JDK extends ToolInstallation implements NodeSpecific<JDK>, En
      * Gets the path to 'java'.
      */
     private File getExecutable() {
-        String execName = (File.separatorChar == '\\') ? "java.exe" : "java";
+        String execName = File.separatorChar == '\\' ? "java.exe" : "java";
         return new File(getHome(),"bin/"+execName);
     }
 
@@ -101,6 +123,7 @@ public final class JDK extends ToolInstallation implements NodeSpecific<JDK>, En
     /**
      * @deprecated as of 1.460. Use {@link #buildEnvVars(EnvVars)}
      */
+    @Deprecated
     public void buildEnvVars(Map<String,String> env) {
         String home = getHome();
         if (home == null) {
@@ -119,10 +142,12 @@ public final class JDK extends ToolInstallation implements NodeSpecific<JDK>, En
         buildEnvVars((Map)env);
     }
 
+    @Override
     public JDK forNode(Node node, TaskListener log) throws IOException, InterruptedException {
         return new JDK(getName(), translateFor(node, log));
     }
 
+    @Override
     public JDK forEnvironment(EnvVars environment) {
         return new JDK(getName(), environment.expand(getHome()));
     }
@@ -139,34 +164,42 @@ public final class JDK extends ToolInstallation implements NodeSpecific<JDK>, En
             TaskListener listener = new StreamTaskListener(new NullStream());
             Launcher launcher = n.createLauncher(listener);
             return launcher.launch().cmds("java","-fullversion").stdout(listener).join()==0;
-        } catch (IOException e) {
-            return false;
-        } catch (InterruptedException e) {
+        } catch (IOException | InterruptedException e) {
             return false;
         }
     }
 
-    @Extension
+    @Extension @Symbol("jdk")
     public static class DescriptorImpl extends ToolDescriptor<JDK> {
 
+        @Override
         public String getDisplayName() {
             return "JDK"; // TODO I18N
         }
 
-        public @Override JDK[] getInstallations() {
-            return Jenkins.getInstance().getJDKs().toArray(new JDK[0]);
-        }
-
-        // this isn't really synchronized well since the list is Hudson.jdks :(
-        public @Override synchronized void setInstallations(JDK... jdks) {
-            List<JDK> list = Jenkins.getInstance().getJDKs();
-            list.clear();
-            list.addAll(Arrays.asList(jdks));
+        @Override
+        public JDK[] getInstallations() {
+            return Jenkins.get().getJDKs().toArray(new JDK[0]);
         }
 
         @Override
-        public List<JDKInstaller> getDefaultInstallers() {
-            return Collections.singletonList(new JDKInstaller(null,false));
+        public void setInstallations(JDK... jdks) {
+            Jenkins.get().setJDKs(Arrays.asList(jdks));
+        }
+
+        @Override
+        public List<? extends ToolInstaller> getDefaultInstallers() {
+            try {
+                Class<? extends ToolInstaller> jdkInstallerClass = Jenkins.get().getPluginManager()
+                        .uberClassLoader.loadClass("hudson.tools.JDKInstaller").asSubclass(ToolInstaller.class);
+                Constructor<? extends ToolInstaller> constructor = jdkInstallerClass.getConstructor(String.class, boolean.class);
+                return Collections.singletonList(constructor.newInstance(null, false));
+            } catch (ClassNotFoundException e) {
+                return Collections.emptyList();
+            } catch (Exception e) {
+                LOGGER.log(Level.WARNING, "Unable to get default installer", e);
+                return Collections.emptyList();
+            }
         }
 
         /**
@@ -175,7 +208,11 @@ public final class JDK extends ToolInstallation implements NodeSpecific<JDK>, En
         @Override protected FormValidation checkHomeDirectory(File value) {
             File toolsJar = new File(value,"lib/tools.jar");
             File mac = new File(value,"lib/dt.jar");
-            if(!toolsJar.exists() && !mac.exists())
+
+            // JENKINS-25601: JDK 9+ no longer has tools.jar. Keep the existing dt.jar/tools.jar checks to be safe.
+            File javac = new File(value, "bin/javac");
+            File javacExe = new File(value, "bin/javac.exe");
+            if(!toolsJar.exists() && !mac.exists() && !javac.exists() && !javacExe.exists())
                 return FormValidation.error(Messages.Hudson_NotJDKDir(value));
 
             return FormValidation.ok();
@@ -189,4 +226,6 @@ public final class JDK extends ToolInstallation implements NodeSpecific<JDK>, En
             return ((JDK)obj).javaHome;
         }
     }
+
+    private static final Logger LOGGER = Logger.getLogger(JDK.class.getName());
 }

@@ -23,10 +23,10 @@
  */
 package hudson.model;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Run.RunExecution;
-
-import java.util.Stack;
 import java.util.Map;
+import java.util.Stack;
 import java.util.WeakHashMap;
 
 /**
@@ -37,12 +37,11 @@ import java.util.WeakHashMap;
  * @since 1.319
  */
 final class RunnerStack {
-    private final Map<Executor,Stack<RunExecution>> stack = new WeakHashMap<Executor,Stack<RunExecution>>();
+    private final Map<Executor,Stack<RunExecution>> stack = new WeakHashMap<>();
 
     synchronized void push(RunExecution r) {
         Executor e = Executor.currentExecutor();
-        Stack<RunExecution> s = stack.get(e);
-        if(s==null) stack.put(e,s=new Stack<RunExecution>());
+        Stack<RunExecution> s = stack.computeIfAbsent(e, k -> new Stack<>());
         s.push(r);
     }
 
@@ -53,8 +52,23 @@ final class RunnerStack {
         if(s.isEmpty()) stack.remove(e);
     }
 
-    synchronized RunExecution peek() {
-        return stack.get(Executor.currentExecutor()).peek();
+    /**
+     * Looks up the currently running build, if known.
+     * <p>While most {@link Run} implementations do add a {@link RunExecution} to the stack for the duration of the build,
+     * those which have a different implementation of {@link Run#run} (or which do additional work after {@link Run#execute} completes)
+     * may not consistently or ever keep an execution on the stack.
+     * In such cases this method will return null, meaning that {@link CheckPoint#block(BuildListener, String)} and {@link CheckPoint#report} will do nothing.
+     * @return a running build, or null if one has not been recorded
+     */
+    synchronized @CheckForNull RunExecution peek() {
+        Executor e = Executor.currentExecutor();
+        if (e != null) {
+            Stack<RunExecution> s = stack.get(e);
+            if (s != null && !s.isEmpty()) {
+                return s.peek();
+            }
+        }
+        return null;
     }
 
     static final RunnerStack INSTANCE = new RunnerStack();

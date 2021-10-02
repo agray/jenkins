@@ -1,17 +1,22 @@
 package hudson.security;
 
+import java.io.PrintWriter;
+import javax.servlet.http.HttpServletResponse;
+import jenkins.util.SystemProperties;
 import org.acegisecurity.AccessDeniedException;
 import org.acegisecurity.Authentication;
-import org.acegisecurity.GrantedAuthority;
-
-import javax.servlet.http.HttpServletResponse;
-import java.io.PrintWriter;
 
 /**
  * {@link AccessDeniedException} with more information.
  * @author Kohsuke Kawaguchi
+ * @deprecated use {@link AccessDeniedException3}
  */
+@Deprecated
 public class AccessDeniedException2 extends AccessDeniedException {
+
+    /** If true, report {@code X-You-Are-In-Group} headers. Disabled due to JENKINS-39402; use {@code /whoAmI} etc. to diagnose permission issues. */
+    private static /* not final */ boolean REPORT_GROUP_HEADERS = SystemProperties.getBoolean(AccessDeniedException2.class.getName() + ".REPORT_GROUP_HEADERS");
+
     /**
      * This object represents the user being authenticated.
      */
@@ -37,14 +42,7 @@ public class AccessDeniedException2 extends AccessDeniedException {
      * Reports the details of the access failure in HTTP headers to assist diagnosis.
      */
     public void reportAsHeaders(HttpServletResponse rsp) {
-        rsp.addHeader("X-You-Are-Authenticated-As",authentication.getName());
-        for (GrantedAuthority auth : authentication.getAuthorities()) {
-            rsp.addHeader("X-You-Are-In-Group",auth.getAuthority());
-        }
-        rsp.addHeader("X-Required-Permission", permission.getId());
-        for (Permission p=permission.impliedBy; p!=null; p=p.impliedBy) {
-            rsp.addHeader("X-Permission-Implied-By", p.getId());
-        }
+        toSpring().reportAsHeaders(rsp);
     }
 
     /**
@@ -53,15 +51,12 @@ public class AccessDeniedException2 extends AccessDeniedException {
      * but instead of using HTTP headers, this version is meant to go inside the payload.
      */
     public void report(PrintWriter w) {
-        w.println("You are authenticated as: "+authentication.getName());
-        w.println("Groups that you are in:");
-        for (GrantedAuthority auth : authentication.getAuthorities()) {
-            w.println("  "+auth.getAuthority());
-        }
+        toSpring().report(w);
+    }
 
-        w.println("Permission you need to have (but didn't): "+permission.getId());
-        for (Permission p=permission.impliedBy; p!=null; p=p.impliedBy) {
-            w.println(" ... which is implied by: "+p.getId());
-        }
+    @Override
+    public AccessDeniedException3 toSpring() {
+        Throwable t = getCause();
+        return t != null ? new AccessDeniedException3(t, authentication.toSpring(), permission) : new AccessDeniedException3(authentication.toSpring(), permission);
     }
 }

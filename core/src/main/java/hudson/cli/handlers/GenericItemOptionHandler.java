@@ -27,16 +27,17 @@ package hudson.cli.handlers;
 import hudson.model.Item;
 import hudson.model.Items;
 import hudson.security.ACL;
+import hudson.security.ACLContext;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
-import org.acegisecurity.Authentication;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.OptionDef;
 import org.kohsuke.args4j.spi.OptionHandler;
 import org.kohsuke.args4j.spi.Parameters;
 import org.kohsuke.args4j.spi.Setter;
+import org.springframework.security.core.Authentication;
 
 /**
  * Refers to an {@link Item} by its name.
@@ -56,26 +57,24 @@ public abstract class GenericItemOptionHandler<T extends Item> extends OptionHan
     protected abstract Class<T> type();
 
     @Override public int parseArguments(Parameters params) throws CmdLineException {
-        final Jenkins j = Jenkins.getInstance();
+        final Jenkins j = Jenkins.get();
         final String src = params.getParameter(0);
         T s = j.getItemByFullName(src, type());
         if (s == null) {
-            final Authentication who = Jenkins.getAuthentication();
-            ACL.impersonate(ACL.SYSTEM, new Runnable() {
-                @Override public void run() {
-                    Item actual = j.getItemByFullName(src);
-                    if (actual == null) {
-                        LOGGER.log(Level.FINE, "really no item exists named {0}", src);
-                    } else {
-                        LOGGER.log(Level.WARNING, "running as {0} could not find {1} of {2}", new Object[] {who.getPrincipal(), actual, type()});
-                    }
+            final Authentication who = Jenkins.getAuthentication2();
+            try (ACLContext acl = ACL.as2(ACL.SYSTEM2)) {
+                Item actual = j.getItemByFullName(src);
+                if (actual == null) {
+                    LOGGER.log(Level.FINE, "really no item exists named {0}", src);
+                } else {
+                    LOGGER.log(Level.WARNING, "running as {0} could not find {1} of {2}", new Object[] {who.getPrincipal(), actual, type()});
                 }
-            });
+            }
             T nearest = Items.findNearest(type(), src, j);
             if (nearest != null) {
-                throw new CmdLineException(owner, "No such job '" + src + "'; perhaps you meant '" + nearest.getFullName() + "'?");
+                throw new IllegalArgumentException("No such job '" + src + "'; perhaps you meant '" + nearest.getFullName() + "'?");
             } else {
-                throw new CmdLineException(owner, "No such job '" + src + "'");
+                throw new IllegalArgumentException("No such job '" + src + "'");
             }
         }
         setter.addValue(s);

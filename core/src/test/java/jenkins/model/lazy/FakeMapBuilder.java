@@ -23,13 +23,13 @@
  */
 package jenkins.model.lazy;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import org.apache.commons.io.FileUtils;
 import org.junit.rules.TestRule;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
-
-import java.io.File;
-import java.io.IOException;
 
 /**
  * Builder for creating a {@link FakeMap}
@@ -46,59 +46,19 @@ public class FakeMapBuilder implements TestRule {
     public FakeMapBuilder() {
     }
 
-    public FakeMapBuilder add(int n, String id) throws IOException {
-        verifyId(id);
-        File build = new File(dir,id);
+    public FakeMapBuilder add(int n) throws IOException {
+        File build = new File(dir, Integer.toString(n));
+        FileUtils.writeStringToFile(new File(build, "n"), Integer.toString(n), StandardCharsets.US_ASCII);
         build.mkdir();
-        FileUtils.writeStringToFile(new File(build, "n"), Integer.toString(n));
-        FileUtils.writeStringToFile(new File(build,"id"),id);
         return this;
     }
 
     /**
-     * Adds a symlink from n to build id.
-     *
-     * (in test we should ideally create a symlink, but we fake the test
-     * by actually making it a directory and staging the same data.)
-     */
-    public FakeMapBuilder addCache(int n, String id) throws IOException {
-        return addBogusCache(n,n,id);
-    }
-
-    public FakeMapBuilder addBogusCache(int label, int actual, String id) throws IOException {
-        verifyId(id);
-        File build = new File(dir,Integer.toString(label));
-        build.mkdir();
-        FileUtils.writeStringToFile(new File(build, "n"), Integer.toString(actual));
-        FileUtils.writeStringToFile(new File(build,"id"),id);
-        return this;
-    }
-
-    public FakeMapBuilder addBoth(int n, String id) throws IOException {
-        return add(n,id).addCache(n,id);
-    }
-
-    private void verifyId(String id) {
-        try {
-            Integer.parseInt(id);
-            throw new IllegalMonitorStateException("ID cannot be a number");
-        } catch (NumberFormatException e) {
-            // OK
-        }
-    }
-
-    /**
-     * Adds a build record under the givn ID but make it unloadable,
+     * Adds a build record under the given ID but make it unloadable,
      * which will cause a failure when a load is attempted on this build ID.
      */
-    public FakeMapBuilder addUnloadable(String id) throws IOException {
-        File build = new File(dir,id);
-        build.mkdir();
-        return this;
-    }
-
-    public FakeMapBuilder addUnloadableCache(int n) throws IOException {
-        File build = new File(dir,String.valueOf(n));
+    public FakeMapBuilder addUnloadable(int n) throws IOException {
+        File build = new File(dir, Integer.toString(n));
         build.mkdir();
         return this;
     }
@@ -108,6 +68,7 @@ public class FakeMapBuilder implements TestRule {
         return new FakeMap(dir);
     }
 
+    @Override
     public Statement apply(final Statement base, Description description) {
         return new Statement() {
             @Override

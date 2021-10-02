@@ -1,24 +1,42 @@
 package hudson;
 
 import com.gargoylesoftware.htmlunit.ScriptException;
-import org.jvnet.hudson.test.HudsonTestCase;
+import com.gargoylesoftware.htmlunit.WebClientUtil;
+import hudson.model.InvisibleAction;
+import hudson.model.RootAction;
+import org.junit.Assert;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.JenkinsRule.WebClient;
+import org.jvnet.hudson.test.TestExtension;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class ExceptionTest extends HudsonTestCase {
+public class ExceptionTest {
+
+    @Rule public JenkinsRule j = new JenkinsRule();
+
     /**
      * Makes sure that an AJAX handler error results in a fatal problem in the unit test.
      */
+    @Test
     public void testAjaxError() throws Exception {
-        try {
-            createWebClient().goTo("/self/ajaxError");
-            fail("should have resulted in a ScriptException");
-        } catch (ScriptException e) {
-            if (e.getMessage().contains("simulated error"))
-                return; // as expected
-            throw e;
+        WebClient webClient = j.createWebClient();
+        WebClientUtil.ExceptionListener exceptionListener = WebClientUtil.addExceptionListener(webClient);
+        webClient.goTo("self/ajaxError");
 
+        // Check for the error.
+        ScriptException e = exceptionListener.getExpectedScriptException();
+        Assert.assertTrue(e.getMessage().contains("simulated error"));
+    }
+
+    @TestExtension
+    public static final class RootActionImpl extends InvisibleAction implements RootAction {
+        @Override
+        public String getUrlName() {
+            return "self";
         }
     }
 }

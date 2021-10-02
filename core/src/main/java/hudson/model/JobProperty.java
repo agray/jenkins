@@ -23,21 +23,20 @@
  */
 package hudson.model;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.ExtensionPoint;
 import hudson.Launcher;
-import hudson.Plugin;
 import hudson.model.Descriptor.FormException;
 import hudson.model.queue.SubTask;
 import hudson.tasks.BuildStep;
+import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Builder;
 import hudson.tasks.Publisher;
-import hudson.tasks.BuildStepMonitor;
-
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
-
 import jenkins.model.Jenkins;
+import jenkins.model.OptionalJobProperty;
 import net.sf.json.JSONObject;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.export.ExportedBean;
@@ -46,14 +45,14 @@ import org.kohsuke.stapler.export.ExportedBean;
  * Extensible property of {@link Job}.
  *
  * <p>
- * {@link Plugin}s can extend this to define custom properties
+ * Plugins can extend this to define custom properties
  * for {@link Job}s. {@link JobProperty}s show up in the user
  * configuration screen, and they are persisted with the job object.
  *
  * <p>
- * Configuration screen should be defined in <tt>config.jelly</tt>.
+ * Configuration screen should be defined in {@code config.jelly}.
  * Within this page, the {@link JobProperty} instance is available
- * as <tt>instance</tt> variable (while <tt>it</tt> refers to {@link Job}.
+ * as {@code instance} variable (while {@code it} refers to {@link Job}.
  *
  * <p>
  * Starting 1.150, {@link JobProperty} implements {@link BuildStep},
@@ -62,6 +61,8 @@ import org.kohsuke.stapler.export.ExportedBean;
  * can add actions to the new build. The {@link #perform(AbstractBuild, Launcher, BuildListener)}
  * and {@link #prebuild(AbstractBuild, BuildListener)} are invoked after those
  * of {@link Publisher}s.
+ *
+ * <p>Consider extending {@link OptionalJobProperty} instead.
  *
  * @param <J>
  *      When you restrict your job property to be only applicable to a certain
@@ -93,17 +94,16 @@ public abstract class JobProperty<J extends Job<?,?>> implements ReconfigurableD
         this.owner = owner;
     }
 
-    /**
-     * {@inheritDoc}
-     */
+    @Override
     public JobPropertyDescriptor getDescriptor() {
-        return (JobPropertyDescriptor) Jenkins.getInstance().getDescriptorOrDie(getClass());
+        return (JobPropertyDescriptor) Jenkins.get().getDescriptorOrDie(getClass());
     }
 
     /**
      * @deprecated
      *      as of 1.341. Override {@link #getJobActions(Job)} instead.
      */
+    @Deprecated
     public Action getJobAction(J job) {
         return null;
     }
@@ -128,6 +128,7 @@ public abstract class JobProperty<J extends Job<?,?>> implements ReconfigurableD
      * @see ProminentProjectAction
      * @see PermalinkProjectAction
      */
+    @NonNull
     public Collection<? extends Action> getJobActions(J job) {
         // delegate to getJobAction (singular) for backward compatible behavior
         Action a = getJobAction(job);
@@ -139,6 +140,7 @@ public abstract class JobProperty<J extends Job<?,?>> implements ReconfigurableD
 // default no-op implementation
 //
 
+    @Override
     public boolean prebuild(AbstractBuild<?,?> build, BuildListener listener) {
         return true;
     }
@@ -149,6 +151,7 @@ public abstract class JobProperty<J extends Job<?,?>> implements ReconfigurableD
      * <p>
      * Invoked after {@link Publisher}s have run.
      */
+    @Override
     public boolean perform(AbstractBuild<?,?> build, Launcher launcher, BuildListener listener) throws InterruptedException, IOException {
         return true;
     }
@@ -157,14 +160,18 @@ public abstract class JobProperty<J extends Job<?,?>> implements ReconfigurableD
      * Returns {@link BuildStepMonitor#NONE} by default, as {@link JobProperty}s normally don't depend
      * on its previous result.
      */
+    @Override
     public BuildStepMonitor getRequiredMonitorService() {
         return BuildStepMonitor.NONE;
     }
 
+    @Override
     public final Action getProjectAction(AbstractProject<?,?> project) {
         return getJobAction((J)project);
     }
 
+    @Override
+    @NonNull
     public final Collection<? extends Action> getProjectActions(AbstractProject<?,?> project) {
         return getJobActions((J)project);
     }
@@ -174,6 +181,7 @@ public abstract class JobProperty<J extends Job<?,?>> implements ReconfigurableD
         return Collections.emptyList();
     }
 
+    @Override
     public JobProperty<?> reconfigure(StaplerRequest req, JSONObject form) throws FormException {
         return form==null ? null : getDescriptor().newInstance(req,form);
     }

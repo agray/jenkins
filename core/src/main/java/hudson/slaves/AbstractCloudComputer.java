@@ -23,13 +23,13 @@
  */
 package hudson.slaves;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.model.Computer;
+import java.io.IOException;
 import org.kohsuke.stapler.HttpRedirect;
 import org.kohsuke.stapler.HttpResponse;
 import org.kohsuke.stapler.HttpResponses;
-
-import java.io.IOException;
-import javax.annotation.CheckForNull;
+import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
  * Partial implementation of {@link Computer} to be used in conjunction with
@@ -50,9 +50,10 @@ public class AbstractCloudComputer<T extends AbstractCloudSlave> extends SlaveCo
     }
 
     /**
-     * When the slave is deleted, free the node right away.
+     * When the agent is deleted, free the node right away.
      */
     @Override
+    @RequirePOST
     public HttpResponse doDoDelete() throws IOException {
         checkPermission(DELETE);
         try {

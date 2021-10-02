@@ -23,16 +23,13 @@
  */
 package hudson.scm;
 
+import hudson.Extension;
 import hudson.model.AbstractProject;
 import hudson.model.Descriptor.FormException;
 import hudson.util.DescriptorList;
-import hudson.Extension;
-
 import java.util.List;
-
-import org.kohsuke.stapler.StaplerRequest;
-
 import javax.servlet.ServletException;
+import org.kohsuke.stapler.StaplerRequest;
 
 /**
  * List of all installed SCMs.
@@ -45,7 +42,8 @@ public class SCMS {
      * @deprecated as of 1.286
      *      Use {@link SCM#all()} for read access and {@link Extension} for registration.
      */
-    public static final List<SCMDescriptor<?>> SCMS = (List)new DescriptorList<SCM>(SCM.class);
+    @Deprecated
+    public static final List<SCMDescriptor<?>> SCMS = (List) new DescriptorList<>(SCM.class);
 
     /**
      * Parses {@link SCM} configuration from the submitted form.
@@ -53,20 +51,21 @@ public class SCMS {
      * @param target
      *      The project for which this SCM is configured to.
      */
+    @SuppressWarnings("deprecation")
     public static SCM parseSCM(StaplerRequest req, AbstractProject target) throws FormException, ServletException {
-        String scm = req.getParameter("scm");
-        if(scm==null)   return new NullSCM();
-
-        int scmidx = Integer.parseInt(scm);
-        SCMDescriptor<?> d = SCM._for(target).get(scmidx);
-        d.generation++;
-        return d.newInstance(req, req.getSubmittedForm().getJSONObject("scm"));
+        SCM scm = SCM.all().newInstanceFromRadioList(req.getSubmittedForm().getJSONObject("scm"));
+        if (scm == null) {
+            scm = new NullSCM(); // JENKINS-36043 workaround for AbstractMultiBranchProject.submit
+        }
+        scm.getDescriptor().incrementGeneration();
+        return scm;
     }
 
     /**
      * @deprecated as of 1.294
      *      Use {@link #parseSCM(StaplerRequest, AbstractProject)} and pass in the caller's project type.
      */
+    @Deprecated
     public static SCM parseSCM(StaplerRequest req) throws FormException, ServletException {
         return parseSCM(req,null);
     }

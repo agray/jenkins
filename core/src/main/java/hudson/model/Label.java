@@ -1,18 +1,18 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2010, Sun Microsystems, Inc., Kohsuke Kawaguchi, Tom Huybrechts
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -23,9 +23,16 @@
  */
 package hudson.model;
 
-import antlr.ANTLRException;
 import static hudson.Util.fixNull;
 
+import antlr.ANTLRException;
+import com.thoughtworks.xstream.converters.Converter;
+import com.thoughtworks.xstream.converters.MarshallingContext;
+import com.thoughtworks.xstream.converters.UnmarshallingContext;
+import com.thoughtworks.xstream.io.HierarchicalStreamReader;
+import com.thoughtworks.xstream.io.HierarchicalStreamWriter;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.Util;
 import hudson.model.labels.LabelAtom;
 import hudson.model.labels.LabelExpression;
 import hudson.model.labels.LabelExpression.And;
@@ -39,39 +46,36 @@ import hudson.model.labels.LabelExpressionLexer;
 import hudson.model.labels.LabelExpressionParser;
 import hudson.model.labels.LabelOperatorPrecedence;
 import hudson.model.labels.LabelVisitor;
+import hudson.model.queue.SubTask;
 import hudson.security.ACL;
-import hudson.slaves.NodeProvisioner;
+import hudson.security.ACLContext;
 import hudson.slaves.Cloud;
+import hudson.slaves.NodeProvisioner;
 import hudson.util.QuotedStringTokenizer;
 import hudson.util.VariableResolver;
+import java.io.Serializable;
+import java.io.StringReader;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 import jenkins.model.Jenkins;
 import jenkins.model.ModelObjectWithChildren;
-import org.acegisecurity.context.SecurityContext;
-import org.acegisecurity.context.SecurityContextHolder;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.DoNotUse;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
 import org.kohsuke.stapler.export.Exported;
 import org.kohsuke.stapler.export.ExportedBean;
 
-import java.io.StringReader;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
-import java.util.Collection;
-import java.util.Stack;
-import java.util.TreeSet;
-
-import com.thoughtworks.xstream.converters.Converter;
-import com.thoughtworks.xstream.converters.MarshallingContext;
-import com.thoughtworks.xstream.converters.UnmarshallingContext;
-import com.thoughtworks.xstream.io.HierarchicalStreamWriter;
-import com.thoughtworks.xstream.io.HierarchicalStreamReader;
-
 /**
  * Group of {@link Node}s.
- * 
+ *
  * @author Kohsuke Kawaguchi
  * @see Jenkins#getLabels()
  * @see Jenkins#getLabel(String)
@@ -81,15 +85,19 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
     /**
      * Display name of this label.
      */
-    protected transient final String name;
+    @NonNull
+    protected final transient String name;
     private transient volatile Set<Node> nodes;
     private transient volatile Set<Cloud> clouds;
+    private transient volatile int tiedJobsCount;
 
     @Exported
-    public transient final LoadStatistics loadStatistics;
-    public transient final NodeProvisioner nodeProvisioner;
+    @NonNull
+    public final transient LoadStatistics loadStatistics;
+    @NonNull
+    public final transient NodeProvisioner nodeProvisioner;
 
-    public Label(String name) {
+    public Label(@NonNull String name) {
         this.name = name;
          // passing these causes an infinite loop - getTotalExecutors(),getBusyExecutors());
         this.loadStatistics = new LoadStatistics(0,0) {
@@ -105,7 +113,18 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
 
             @Override
             public int computeQueueLength() {
-                return Jenkins.getInstance().getQueue().countBuildableItemsFor(Label.this);
+                return Jenkins.get().getQueue().countBuildableItemsFor(Label.this);
+            }
+
+            @Override
+            protected Set<Node> getNodes() {
+                return Label.this.getNodes();
+            }
+
+            @Override
+            protected boolean matches(Queue.Item item, SubTask subTask) {
+                final Label l = item.getAssignedLabelFor(subTask);
+                return l != null && Label.this.matches(l.name);
             }
         };
         this.nodeProvisioner = new NodeProvisioner(this, loadStatistics);
@@ -114,7 +133,7 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
     /**
      * Alias for {@link #getDisplayName()}.
      */
-    @Exported
+    @Exported(visibility=2)
     public final String getName() {
         return getDisplayName();
     }
@@ -122,6 +141,8 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
     /**
      * Returns a human-readable text that represents this label.
      */
+    @Override
+    @NonNull
     public String getDisplayName() {
         return name;
     }
@@ -135,12 +156,20 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
      * Relative URL from the context path, that ends with '/'.
      */
     public String getUrl() {
-        return "label/"+name+'/';
+        return "label/" + Util.rawEncode(name) + '/';
     }
 
+    @Override
     public String getSearchUrl() {
         return getUrl();
     }
+
+    /**
+     * Returns true iff this label is an atom.
+     *
+     * @since 1.580
+     */
+    public boolean isAtom() { return false; }
 
     /**
      * Evaluates whether the label expression is true given the specified value assignment.
@@ -154,6 +183,7 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
      */
     public final boolean matches(final Collection<LabelAtom> labels) {
         return matches(new VariableResolver<Boolean>() {
+            @Override
             public Boolean resolve(String name) {
                 for (LabelAtom a : labels)
                     if (a.getName().equals(name))
@@ -173,7 +203,19 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
      */
     public boolean isSelfLabel() {
         Set<Node> nodes = getNodes();
-        return nodes.size() == 1 && nodes.iterator().next().getSelfLabel() == this;
+        return nodes.size() == 1 && nodes.iterator().next().getSelfLabel().equals(this);
+    }
+
+    private static class NodeSorter implements Comparator<Node>, Serializable {
+        private static final long serialVersionUID = -7368519598046684532L;
+
+        @Override
+        public int compare(Node o1, Node o2) {
+            if (o1 == o2) {
+                return 0;
+            }
+            return o1 instanceof Jenkins ? -1 : o2 instanceof Jenkins ? 1 : o1.getNodeName().compareTo(o2.getNodeName());
+        }
     }
 
     /**
@@ -184,8 +226,8 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
         Set<Node> nodes = this.nodes;
         if(nodes!=null) return nodes;
 
-        Set<Node> r = new HashSet<Node>();
-        Jenkins h = Jenkins.getInstance();
+        Set<Node> r = new HashSet<>();
+        Jenkins h = Jenkins.get();
         if(this.matches(h))
             r.add(h);
         for (Node n : h.getNodes()) {
@@ -195,14 +237,21 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
         return this.nodes = Collections.unmodifiableSet(r);
     }
 
+    @Restricted(DoNotUse.class) // Jelly
+    public Set<Node> getSortedNodes() {
+        Set<Node> r = new TreeSet<>(new NodeSorter());
+        r.addAll(getNodes());
+        return r;
+    }
+
     /**
      * Gets all {@link Cloud}s that can launch for this label.
      */
     @Exported
     public Set<Cloud> getClouds() {
         if(clouds==null) {
-            Set<Cloud> r = new HashSet<Cloud>();
-            Jenkins h = Jenkins.getInstance();
+            Set<Cloud> r = new HashSet<>();
+            Jenkins h = Jenkins.get();
             for (Cloud c : h.clouds) {
                 if(c.canProvision(this))
                     r.add(c);
@@ -211,14 +260,14 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
         }
         return clouds;
     }
-    
+
     /**
      * Can jobs be assigned to this label?
      * <p>
      * The answer is yes if there is a reasonable basis to believe that Hudson can have
      * an executor under this label, given the current configuration. This includes
-     * situations such as (1) there are offline slaves that have this label (2) clouds exist
-     * that can provision slaves that have this label.
+     * situations such as (1) there are offline agents that have this label (2) clouds exist
+     * that can provision agents that have this label.
      */
     public boolean isAssignable() {
         for (Node n : getNodes())
@@ -341,61 +390,32 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
      */
     @Exported
     public List<AbstractProject> getTiedJobs() {
-        List<AbstractProject> r = new ArrayList<AbstractProject>();
-        for (AbstractProject<?,?> p : Jenkins.getInstance().getAllItems(AbstractProject.class)) {
-            if(p instanceof TopLevelItem && this.equals(p.getAssignedLabel()))
-                r.add(p);
-        }
-        return r;
+        return StreamSupport.stream(Jenkins.get().allItems(AbstractProject.class,
+                i -> i instanceof TopLevelItem && this.equals(i.getAssignedLabel())).spliterator(),
+                true)
+                .sorted(Items.BY_FULL_NAME).collect(Collectors.toList());
     }
 
     /**
-     * Returns a count of projects that are tied on this node. In a system without security this should be the same
+     * Returns an approximate count of projects that are tied on this node.
+     *
+     * In a system without security this should be the same
      * as {@code getTiedJobs().size()} but significantly faster as it involves fewer temporary objects and avoids
      * sorting the intermediary list. In a system with security, this will likely return a higher value as it counts
      * all jobs (mostly) irrespective of access.
      * @return a count of projects that are tied on this node.
      */
     public int getTiedJobCount() {
+        if (tiedJobsCount != -1) return tiedJobsCount;
+
         // denormalize for performance
         // we don't need to respect security as much when returning a simple count
-        SecurityContext context = ACL.impersonate(ACL.SYSTEM);
-        try {
+        try (ACLContext ctx = ACL.as2(ACL.SYSTEM2)) {
             int result = 0;
-            // top level gives the map without checking security of items in the map
-            // therefore best performance
-            for (TopLevelItem topLevelItem : Jenkins.getInstance().getItemMap().values()) {
-                if (topLevelItem instanceof AbstractProject) {
-                    final AbstractProject project = (AbstractProject) topLevelItem;
-                    if (this.equals(project.getAssignedLabel())) {
-                        result++;
-                    }
-                }
-                if (topLevelItem instanceof ItemGroup) {
-                    Stack<ItemGroup> q = new Stack<ItemGroup>();
-                    q.push((ItemGroup) topLevelItem);
-
-                    while (!q.isEmpty()) {
-                        ItemGroup<?> parent = q.pop();
-                        // we run the risk of permissions checks in ItemGroup#getItems()
-                        // not much we can do here though
-                        for (Item i : parent.getItems()) {
-                            if (i instanceof AbstractProject) {
-                                final AbstractProject project = (AbstractProject) i;
-                                if (this.equals(project.getAssignedLabel())) {
-                                    result++;
-                                }
-                            }
-                            if (i instanceof ItemGroup) {
-                                q.push((ItemGroup) i);
-                            }
-                        }
-                    }
-                }
+            for (AbstractProject ignored : Jenkins.get().allItems(AbstractProject.class, p -> matches(p.getAssignedLabelString()))) {
+                ++result;
             }
-            return result;
-        } finally {
-            SecurityContextHolder.setContext(context);
+            return tiedJobsCount = result;
         }
     }
 
@@ -410,10 +430,11 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
     public boolean isEmpty() {
         return getNodes().isEmpty() && getClouds().isEmpty();
     }
-    
+
     /*package*/ void reset() {
         nodes = null;
         clouds = null;
+        tiedJobsCount = -1;
     }
 
     /**
@@ -434,48 +455,48 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
      * @since 1.420
      */
     public Set<LabelAtom> listAtoms() {
-        Set<LabelAtom> r = new HashSet<LabelAtom>();
+        Set<LabelAtom> r = new HashSet<>();
         accept(ATOM_COLLECTOR,r);
         return r;
     }
 
     /**
-     * Returns the label that represents "this&amp;rhs"
+     * Returns the label that represents {@code this&&rhs}
      */
     public Label and(Label rhs) {
         return new LabelExpression.And(this,rhs);
     }
 
     /**
-     * Returns the label that represents "this|rhs"
+     * Returns the label that represents {@code this||rhs}
      */
     public Label or(Label rhs) {
         return new LabelExpression.Or(this,rhs);
     }
 
     /**
-     * Returns the label that represents "this&lt;->rhs"
+     * Returns the label that represents {@code this<->rhs}
      */
     public Label iff(Label rhs) {
         return new LabelExpression.Iff(this,rhs);
     }
 
     /**
-     * Returns the label that represents "this->rhs"
+     * Returns the label that represents {@code this->rhs}
      */
     public Label implies(Label rhs) {
         return new LabelExpression.Implies(this,rhs);
     }
 
     /**
-     * Returns the label that represents "!this"
+     * Returns the label that represents {@code !this}
      */
     public Label not() {
         return new LabelExpression.Not(this);
     }
 
     /**
-     * Returns the label that represents "(this)"
+     * Returns the label that represents {@code (this)}
      * This is a pointless operation for machines, but useful
      * for humans who find the additional parenthesis often useful
      */
@@ -490,21 +511,31 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
 
 
     @Override
-    public boolean equals(Object that) {
+    public final boolean equals(Object that) {
         if (this == that) return true;
         if (that == null || getClass() != that.getClass()) return false;
 
-        return name.equals(((Label)that).name);
+        return matches(((Label)that).name);
 
     }
 
     @Override
-    public int hashCode() {
+    public final int hashCode() {
         return name.hashCode();
     }
 
-    public int compareTo(Label that) {
+    @Override
+    public final int compareTo(Label that) {
         return this.name.compareTo(that.name);
+    }
+
+
+    /**
+     * Evaluates whether the current label name is equal to the name parameter.
+     *
+     */
+    private boolean matches(String name) {
+        return this.name.equals(name);
     }
 
     @Override
@@ -512,6 +543,7 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
         return name;
     }
 
+    @Override
     public ContextMenu doChildrenContextMenu(StaplerRequest request, StaplerResponse response) throws Exception {
         ContextMenu menu = new ContextMenu();
         for (Node node : getNodes()) {
@@ -524,22 +556,25 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
         public ConverterImpl() {
         }
 
+        @Override
         public boolean canConvert(Class type) {
             return Label.class.isAssignableFrom(type);
         }
 
+        @Override
         public void marshal(Object source, HierarchicalStreamWriter writer, MarshallingContext context) {
             Label src = (Label) source;
             writer.setValue(src.getExpression());
         }
 
+        @Override
         public Object unmarshal(HierarchicalStreamReader reader, final UnmarshallingContext context) {
-            return Jenkins.getInstance().getLabel(reader.getValue());
+            return Jenkins.get().getLabel(reader.getValue());
         }
     }
 
     /**
-     * Convers a whitespace-separate list of tokens into a set of {@link Label}s.
+     * Convert a whitespace-separate list of tokens into a set of {@link Label}s.
      *
      * @param labels
      *      Strings like "abc def ghi". Can be empty or null.
@@ -549,11 +584,13 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
      * @since 1.308
      */
     public static Set<LabelAtom> parse(String labels) {
-        Set<LabelAtom> r = new TreeSet<LabelAtom>();
+        final Set<LabelAtom> r = new TreeSet<>();
         labels = fixNull(labels);
-        if(labels.length()>0)
-            for( String l : new QuotedStringTokenizer(labels).toArray())
-                r.add(Jenkins.getInstance().getLabelAtom(l));
+        if(labels.length()>0) {
+            final QuotedStringTokenizer tokenizer = new QuotedStringTokenizer(labels);
+            while (tokenizer.hasMoreTokens())
+                r.add(Jenkins.get().getLabelAtom(tokenizer.nextToken()));
+            }
         return r;
     }
 
@@ -561,7 +598,7 @@ public abstract class Label extends Actionable implements Comparable<Label>, Mod
      * Obtains a label by its {@linkplain #getName() name}.
      */
     public static Label get(String l) {
-        return Jenkins.getInstance().getLabel(l);
+        return Jenkins.get().getLabel(l);
     }
 
     /**

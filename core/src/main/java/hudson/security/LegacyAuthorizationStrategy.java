@@ -23,15 +23,14 @@
  */
 package hudson.security;
 
-import hudson.model.Descriptor;
-import jenkins.model.Jenkins;
 import hudson.Extension;
-import org.acegisecurity.acls.sid.GrantedAuthoritySid;
-import org.kohsuke.stapler.StaplerRequest;
-import net.sf.json.JSONObject;
-
+import hudson.model.Descriptor;
 import java.util.Collection;
 import java.util.Collections;
+import jenkins.model.Jenkins;
+import org.acegisecurity.acls.sid.GrantedAuthoritySid;
+import org.jenkinsci.Symbol;
+import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
  * {@link AuthorizationStrategy} implementation that emulates the legacy behavior.
@@ -43,26 +42,25 @@ public final class LegacyAuthorizationStrategy extends AuthorizationStrategy {
         add(new GrantedAuthoritySid("admin"), Jenkins.ADMINISTER,true);
     }};
 
+    @DataBoundConstructor
+    public LegacyAuthorizationStrategy() {
+    }
+
+    @Override
     public ACL getRootACL() {
         return LEGACY_ACL;
     }
 
+    @Override
     public Collection<String> getGroups() {
         return Collections.singleton("admin");
     }
 
-    @Extension
+    @Extension @Symbol("legacy")
     public static final class DescriptorImpl extends Descriptor<AuthorizationStrategy> {
+        @Override
         public String getDisplayName() {
             return Messages.LegacyAuthorizationStrategy_DisplayName();
-        }
-
-        public String getHelpFile() {
-            return "/help/security/legacy-auth-strategy.html";
-        }
-
-        public LegacyAuthorizationStrategy newInstance(StaplerRequest req, JSONObject formData) throws FormException {
-            return new LegacyAuthorizationStrategy();
         }
     }
 }

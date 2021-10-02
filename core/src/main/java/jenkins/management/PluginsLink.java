@@ -24,13 +24,20 @@
 
 package jenkins.management;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
 import hudson.model.ManagementLink;
+import hudson.model.UpdateCenter;
+import hudson.security.Permission;
+import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * @author <a href="mailto:nicolas.deloof@gmail.com">Nicolas De Loof</a>
  */
-@Extension(ordinal = Integer.MAX_VALUE - 400)
+@Extension(ordinal = Integer.MAX_VALUE - 400) @Symbol("plugins")
 public class PluginsLink extends ManagementLink {
 
     @Override
@@ -38,6 +45,7 @@ public class PluginsLink extends ManagementLink {
         return "plugin.png";
     }
 
+    @Override
     public String getDisplayName() {
         return Messages.PluginsLink_DisplayName();
     }
@@ -50,5 +58,27 @@ public class PluginsLink extends ManagementLink {
     @Override
     public String getUrlName() {
         return "pluginManager";
+    }
+
+    @NonNull
+    @Override
+    public Permission getRequiredPermission() {
+        return Jenkins.SYSTEM_READ;
+    }
+  
+    @NonNull
+    @Override
+    public Category getCategory() {
+        return Category.CONFIGURATION;
+    }
+
+    @Restricted(NoExternalUse.class)
+    public boolean hasUpdates() {
+        final UpdateCenter updateCenter = Jenkins.get().getUpdateCenter();
+        if (!updateCenter.isSiteDataReady()) {
+            // Do not display message during this page load, but possibly later.
+            return false;
+        }
+        return !updateCenter.getUpdates().isEmpty();
     }
 }

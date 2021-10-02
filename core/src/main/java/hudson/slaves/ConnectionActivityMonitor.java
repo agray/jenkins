@@ -23,21 +23,22 @@
  */
 package hudson.slaves;
 
-import hudson.model.AsyncPeriodicWork;
-import hudson.model.TaskListener;
-import jenkins.model.Jenkins;
-import hudson.model.Computer;
-import hudson.util.TimeUnit2;
-import hudson.remoting.VirtualChannel;
-import hudson.remoting.Channel;
-import hudson.remoting.Callable;
 import hudson.Extension;
-
+import hudson.model.AsyncPeriodicWork;
+import hudson.model.Computer;
+import hudson.model.TaskListener;
+import hudson.remoting.Channel;
+import hudson.remoting.VirtualChannel;
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
+import jenkins.model.Jenkins;
+import jenkins.security.SlaveToMasterCallable;
+import jenkins.util.SystemProperties;
+import org.jenkinsci.Symbol;
 
 /**
- * Makes sure that connections to slaves are alive, and if they are not, cut them off.
+ * Makes sure that connections to agents are alive, and if they are not, cut them off.
  *
  * <p>
  * If we only rely on TCP retransmission time out for this, the time it takes to detect a bad connection
@@ -46,22 +47,23 @@ import java.util.logging.Logger;
  * @author Kohsuke Kawaguchi
  * @since 1.325
  */
-@Extension
+@Extension @Symbol("connectionActivityMonitor")
 public class ConnectionActivityMonitor extends AsyncPeriodicWork {
     public ConnectionActivityMonitor() {
-        super("Connection Activity monitoring to slaves");
+        super("Connection Activity monitoring to agents");
     }
 
+    @Override
     protected void execute(TaskListener listener) throws IOException, InterruptedException {
         if (!enabled)   return;
 
         long now = System.currentTimeMillis();
-        for (Computer c: Jenkins.getInstance().getComputers()) {
+        for (Computer c: Jenkins.get().getComputers()) {
             VirtualChannel ch = c.getChannel();
             if (ch instanceof Channel) {
                 Channel channel = (Channel) ch;
                 if (now-channel.getLastHeard() > TIME_TILL_PING) {
-                    // haven't heard from this slave for a while.
+                    // haven't heard from this agent for a while.
                     Long lastPing = (Long)channel.getProperty(ConnectionActivityMonitor.class);
 
                     if (lastPing!=null && now-lastPing > TIMEOUT) {
@@ -81,28 +83,30 @@ public class ConnectionActivityMonitor extends AsyncPeriodicWork {
         }
     }
 
+    @Override
     public long getRecurrencePeriod() {
-        return enabled ? FREQUENCY : TimeUnit2.DAYS.toMillis(30);
+        return enabled ? FREQUENCY : TimeUnit.DAYS.toMillis(30);
     }
 
     /**
      * Time till initial ping
      */
-    private static final long TIME_TILL_PING = Long.getLong(ConnectionActivityMonitor.class.getName()+".timeToPing",TimeUnit2.MINUTES.toMillis(3));
+    private static final long TIME_TILL_PING = SystemProperties.getLong(ConnectionActivityMonitor.class.getName()+".timeToPing",TimeUnit.MINUTES.toMillis(3));
 
-    private static final long FREQUENCY = Long.getLong(ConnectionActivityMonitor.class.getName()+".frequency",TimeUnit2.SECONDS.toMillis(10));
+    private static final long FREQUENCY = SystemProperties.getLong(ConnectionActivityMonitor.class.getName()+".frequency",TimeUnit.SECONDS.toMillis(10));
 
     /**
      * When do we abandon the effort and cut off?
      */
-    private static final long TIMEOUT = Long.getLong(ConnectionActivityMonitor.class.getName()+".timeToPing",TimeUnit2.MINUTES.toMillis(4));
+    private static final long TIMEOUT = SystemProperties.getLong(ConnectionActivityMonitor.class.getName()+".timeToPing",TimeUnit.MINUTES.toMillis(4));
 
 
     // disabled by default until proven in the production
-    public boolean enabled = Boolean.getBoolean(ConnectionActivityMonitor.class.getName()+".enabled");
+    public boolean enabled = SystemProperties.getBoolean(ConnectionActivityMonitor.class.getName()+".enabled");
 
     private static final PingCommand PING_COMMAND = new PingCommand();
-    private static final class PingCommand implements Callable<Void,RuntimeException> {
+    private static final class PingCommand extends SlaveToMasterCallable<Void,RuntimeException> {
+        @Override
         public Void call() throws RuntimeException {
             return null;
         }

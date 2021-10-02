@@ -26,23 +26,25 @@ package hudson.tools;
 
 import hudson.Extension;
 import hudson.FilePath;
-import hudson.FilePath.FileCallable;
+import hudson.Functions;
 import hudson.ProxyConfiguration;
 import hudson.Util;
-import hudson.Functions;
 import hudson.model.Node;
 import hudson.model.TaskListener;
 import hudson.remoting.VirtualChannel;
 import hudson.util.FormValidation;
-
 import java.io.File;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
+import jenkins.MasterToSlaveFileCallable;
+import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
  * Installs a tool into the Hudson working area by downloading and unpacking a ZIP file.
@@ -74,6 +76,7 @@ public class ZipExtractionInstaller extends ToolInstaller {
         return subdir;
     }
 
+    @Override
     public FilePath performInstallation(ToolInstallation tool, Node node, TaskListener log) throws IOException, InterruptedException {
         FilePath dir = preferredLocation(tool, node);
         if (dir.installIfNecessaryFrom(new URL(url), log, "Unpacking " + url + " to " + dir + " on " + node.getDisplayName())) {
@@ -86,14 +89,18 @@ public class ZipExtractionInstaller extends ToolInstaller {
         }
     }
 
-    @Extension
+    @Extension @Symbol("zip")
     public static class DescriptorImpl extends ToolInstallerDescriptor<ZipExtractionInstaller> {
 
+        @Override
         public String getDisplayName() {
             return Messages.ZipExtractionInstaller_DescriptorImpl_displayName();
         }
 
+        @RequirePOST
         public FormValidation doCheckUrl(@QueryParameter String value) {
+            Jenkins.get().checkPermission(Jenkins.ADMINISTER);
+            
             try {
                 URLConnection conn = ProxyConfiguration.open(new URL(value));
                 conn.connect();
@@ -116,8 +123,9 @@ public class ZipExtractionInstaller extends ToolInstaller {
      * Sets execute permission on all files, since unzip etc. might not do this.
      * Hackish, is there a better way?
      */
-    static class ChmodRecAPlusX implements FileCallable<Void> {
+    static class ChmodRecAPlusX extends MasterToSlaveFileCallable<Void> {
         private static final long serialVersionUID = 1L;
+        @Override
         public Void invoke(File d, VirtualChannel channel) throws IOException {
             if(!Functions.isWindows())
                 process(d);

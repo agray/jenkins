@@ -23,15 +23,16 @@
  */
 package hudson.security;
 
-import org.acegisecurity.Authentication;
-import org.acegisecurity.GrantedAuthority;
-import org.acegisecurity.acls.sid.PrincipalSid;
-import org.acegisecurity.acls.sid.GrantedAuthoritySid;
-import org.acegisecurity.acls.sid.Sid;
-
-import java.util.logging.Logger;
 import static java.util.logging.Level.FINE;
 import static java.util.logging.Level.FINER;
+
+import edu.umd.cs.findbugs.annotations.NonNull;
+import java.util.logging.Logger;
+import org.acegisecurity.acls.sid.GrantedAuthoritySid;
+import org.acegisecurity.acls.sid.PrincipalSid;
+import org.acegisecurity.acls.sid.Sid;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 
 /**
  * {@link ACL} that checks permissions based on {@link GrantedAuthority}
@@ -42,8 +43,8 @@ import static java.util.logging.Level.FINER;
 public abstract class SidACL extends ACL {
 
     @Override
-    public boolean hasPermission(Authentication a, Permission permission) {
-        if(a==SYSTEM) {
+    public boolean hasPermission2(@NonNull Authentication a, Permission permission) {
+        if(a.equals(SYSTEM2)) {
             if(LOGGER.isLoggable(FINE))
                 LOGGER.fine("hasPermission("+a+","+permission+")=>SYSTEM user has full access");
             return true;
@@ -58,13 +59,13 @@ public abstract class SidACL extends ACL {
     }
 
     /**
-     * Implementation that backs up {@link #hasPermission(Authentication, Permission)}.
+     * Implementation that backs up {@link #hasPermission2(Authentication, Permission)}.
      *
      * @return
      *      true or false if {@link #hasPermission(Sid, Permission)} returns it.
      *      Otherwise null, indicating that this ACL doesn't have any entry for it.
      */
-    protected Boolean _hasPermission(Authentication a, Permission permission) {
+    protected Boolean _hasPermission(@NonNull Authentication a, Permission permission) {
         // ACL entries for this principal takes precedence
         Boolean b = hasPermission(new PrincipalSid(a),permission);
         if(LOGGER.isLoggable(FINER))
@@ -99,7 +100,7 @@ public abstract class SidACL extends ACL {
      * Checks if the given {@link Sid} has the given {@link Permission}.
      *
      * <p>
-     * {@link #hasPermission(Authentication, Permission)} is implemented
+     * {@link #hasPermission2(Authentication, Permission)} is implemented
      * by checking authentication's {@link GrantedAuthority} by using
      * this method.
      *
@@ -110,7 +111,7 @@ public abstract class SidACL extends ACL {
      * @return
      *      true if the access should be granted, false if it should be denied.
      *      The null value indicates that the ACL does no rule for this Sid/Permission
-     *      combination. The caller can decide what to do &mash; such as consulting the higher level ACL,
+     *      combination. The caller can decide what to do—such as consulting the higher level ACL,
      *      or denying the access (if the model is no-access-by-default.)  
      */
     protected abstract Boolean hasPermission(Sid p, Permission permission);
@@ -137,6 +138,7 @@ public abstract class SidACL extends ACL {
     public final SidACL newInheritingACL(final SidACL parent) {
         final SidACL child = this;
         return new SidACL() {
+            @Override
             protected Boolean hasPermission(Sid p, Permission permission) {
                 Boolean b = child.hasPermission(p, permission);
                 if(b!=null) return b;

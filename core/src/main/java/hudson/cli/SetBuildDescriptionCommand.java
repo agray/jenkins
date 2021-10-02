@@ -1,16 +1,15 @@
 package hudson.cli;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.Extension;
-import hudson.model.AbstractProject;
+import hudson.model.Job;
 import hudson.model.Run;
-import hudson.remoting.Callable;
-
-import java.io.IOException;
 import java.io.Serializable;
-
 import org.apache.commons.io.IOUtils;
 import org.kohsuke.args4j.Argument;
 
+// TODO: Remove Serializable
+@SuppressFBWarnings(value = "SE_NO_SERIALVERSIONID", justification = "The Serializable should be removed.")
 @Extension
 public class SetBuildDescriptionCommand extends CLICommand implements Serializable {
 
@@ -20,7 +19,7 @@ public class SetBuildDescriptionCommand extends CLICommand implements Serializab
      }
 
     @Argument(metaVar="JOB",usage="Name of the job to build",required=true,index=0)
-    public transient AbstractProject<?,?> job;
+    public transient Job<?,?> job;
 
     @Argument(metaVar="BUILD#",usage="Number of the build",required=true,index=1)
     public int number;
@@ -28,8 +27,12 @@ public class SetBuildDescriptionCommand extends CLICommand implements Serializab
     @Argument(metaVar="DESCRIPTION",required=true,usage="Description to be set. '=' to read from stdin.", index=2)
     public String description;
 
+    @Override
     protected int run() throws Exception {
     	Run run = job.getBuildByNumber(number);
+        if (run == null)
+            throw new IllegalArgumentException("No such build #"+number);
+
         run.checkPermission(Run.UPDATE);
 
         if ("=".equals(description)) {

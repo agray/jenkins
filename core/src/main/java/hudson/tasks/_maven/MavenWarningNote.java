@@ -28,8 +28,8 @@ import hudson.MarkupText;
 import hudson.console.ConsoleAnnotationDescriptor;
 import hudson.console.ConsoleAnnotator;
 import hudson.console.ConsoleNote;
-
 import java.util.regex.Pattern;
+import org.jenkinsci.Symbol;
 
 /**
  * Marks the warning messages from Maven.
@@ -46,12 +46,13 @@ public class MavenWarningNote extends ConsoleNote {
         return null;
     }
 
-    @Extension
+    @Extension @Symbol("mavenWarnings")
     public static final class DescriptorImpl extends ConsoleAnnotationDescriptor {
+        @Override
         public String getDisplayName() {
             return "Maven Warnings";
         }
     }
 
-    public static Pattern PATTERN = Pattern.compile("^\\[WARNING\\]");
+    public static final Pattern PATTERN = Pattern.compile("^\\[WARNING\\]");
 }

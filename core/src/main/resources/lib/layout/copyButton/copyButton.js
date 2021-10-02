@@ -1,37 +1,30 @@
-// @include org.kohsuke.stapler.zeroclipboard
-
 Behaviour.specify("span.copy-button", 'copyButton', 0, function(e) {
-        var btn = e.firstChild;
-        var id = "copy-button"+(iota++);
-        btn.id = id;
+    var btn = e.firstChild;
+    var id = "copy-button"+(iota++);
+    btn.id = id;
 
-        var clip = new ZeroClipboard.Client();
-        clip.setText(e.getAttribute("text"));
-        makeButton(btn);
-        clip.setHandCursor(true);
+    makeButton(btn, function() {
+        //make an invisible textarea element containing the text
+        var el = document.createElement('textarea');
+        el.value = e.getAttribute("text");
+        el.style.width = "1px";
+        el.style.height = "1px";
+        el.style.border = "none";
+        el.style.padding = "0px";
+        el.style.position = "absolute";
+        el.style.top = "-99999px";
+        el.style.left = "-99999px";
+        el.setAttribute("tabindex", "-1");
+        document.body.appendChild(el);
 
-        var container = e.getAttribute("container");
-        if (container) {
-            container = $(e).up(container);
-            container.style.position = "relative";
-            clip.glue(id,container);
-        } else {
-            clip.glue(id);
-        }
+        //select the text and copy it to the clipboard
+        el.select();
+        document.execCommand('copy');
 
-        clip.addEventListener('onComplete',function() {
-            notificationBar.show(e.getAttribute("message"));
-        });
-        clip.addEventListener('onMouseOver',function() {
-          $(id).addClassName('yui-button-hover')
-        });
-        clip.addEventListener('onMouseOut',function() {
-            $(id).removeClassName('yui-button-hover')
-        });
-        clip.addEventListener('onMouseDown',function() {
-            $(id).addClassName('yui-button-active')
-        });
-        clip.addEventListener('onMouseUp',function() {
-            $(id).removeClassName('yui-button-active')
-        });
+        //remove the textarea element
+        document.body.removeChild(el);
+
+        //show the notification
+        notificationBar.show(e.getAttribute("message"));
+    });
 });

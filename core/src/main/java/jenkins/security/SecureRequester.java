@@ -5,9 +5,9 @@ import hudson.ExtensionPoint;
 import hudson.model.Api;
 import java.util.logging.Logger;
 import jenkins.model.Jenkins;
+import jenkins.util.SystemProperties;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-
 import org.kohsuke.stapler.StaplerRequest;
 
 /**
@@ -34,7 +34,7 @@ public interface SecureRequester extends ExtensionPoint {
     @Extension class Default implements SecureRequester {
 
         private static final String PROP = "hudson.model.Api.INSECURE";
-        private static final boolean INSECURE = Boolean.getBoolean(PROP);
+        private static final boolean INSECURE = SystemProperties.getBoolean(PROP);
         static {
             if (INSECURE) {
                 Logger.getLogger(SecureRequester.class.getName()).warning(PROP + " system property is deprecated; implement SecureRequester instead");
@@ -42,7 +42,7 @@ public interface SecureRequester extends ExtensionPoint {
         }
 
         @Override public boolean permit(StaplerRequest req, Object bean) {
-            return INSECURE || !Jenkins.getInstance().isUseSecurity();
+            return INSECURE || !Jenkins.get().isUseSecurity();
         }
 
     }

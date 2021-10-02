@@ -1,10 +1,12 @@
 package hudson.model.queue;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.console.ModelHyperlinkNote;
-import hudson.model.Queue.Task;
-import hudson.model.Node;
-import hudson.model.Messages;
+import hudson.model.Computer;
 import hudson.model.Label;
+import hudson.model.Messages;
+import hudson.model.Node;
+import hudson.model.Queue.Task;
 import hudson.model.TaskListener;
 import hudson.slaves.Cloud;
 import org.jvnet.localizer.Localizable;
@@ -17,7 +19,7 @@ import org.jvnet.localizer.Localizable;
  * has expanded beyond queues.
  *
  * <h2>View</h2>
- * <tt>summary.jelly</tt> should do one-line HTML rendering to be used showing the cause
+ * {@code summary.jelly} should do one-line HTML rendering to be used showing the cause
  * to the user. By default it simply renders {@link #getShortDescription()} text.
  *
  * <p>
@@ -42,8 +44,10 @@ public abstract class CauseOfBlockage {
     /**
      * Obtains a simple implementation backed by {@link Localizable}.
      */
-    public static CauseOfBlockage fromMessage(final Localizable l) {
+    public static CauseOfBlockage fromMessage(@NonNull final Localizable l) {
+        l.getKey(); // null check
         return new CauseOfBlockage() {
+            @Override
             public String getShortDescription() {
                 return l.toString();
             }
@@ -76,6 +80,7 @@ public abstract class CauseOfBlockage {
             this.l = l;
         }
 
+        @Override
         public String getShortDescription() {
             return l.toString();
         }
@@ -91,8 +96,9 @@ public abstract class CauseOfBlockage {
             this.node = node;
         }
 
+        @Override
         public String getShortDescription() {
-            String name = (node.toComputer() != null) ? node.toComputer().getDisplayName() : node.getDisplayName();
+            String name = node.toComputer() != null ? node.toComputer().getDisplayName() : node.getDisplayName();
             return Messages.Queue_NodeOffline(name);
         }
         
@@ -101,6 +107,33 @@ public abstract class CauseOfBlockage {
             listener.getLogger().println(
                 Messages.Queue_NodeOffline(ModelHyperlinkNote.encodeTo(node)));
         }
+    }
+
+    /**
+     * Build is blocked because a node (or its retention strategy) is not accepting tasks.
+     * @since 2.37
+     */
+    public static final class BecauseNodeIsNotAcceptingTasks extends CauseOfBlockage implements NeedsMoreExecutor {
+
+        public final Node node;
+
+        public BecauseNodeIsNotAcceptingTasks(Node node) {
+            this.node = node;
+        }
+
+        @Override
+        public String getShortDescription() {
+            Computer computer = node.toComputer();
+            String name = computer != null ? computer.getDisplayName() : node.getDisplayName();
+            return Messages.Node_BecauseNodeIsNotAcceptingTasks(name);
+        }
+
+        @Override
+        public void print(TaskListener listener) {
+            listener.getLogger().println(
+                Messages.Node_BecauseNodeIsNotAcceptingTasks(ModelHyperlinkNote.encodeTo(node)));
+        }
+
     }
 
     /**
@@ -113,6 +146,7 @@ public abstract class CauseOfBlockage {
             this.label = l;
         }
 
+        @Override
         public String getShortDescription() {
             if (label.isEmpty()) {
                 return Messages.Queue_LabelHasNoNodes(label.getName());
@@ -120,6 +154,16 @@ public abstract class CauseOfBlockage {
                 return Messages.Queue_AllNodesOffline(label.getName());
             }
         }
+
+        @Override
+        public void print(TaskListener listener) {
+            if (label.isEmpty()) {
+                listener.getLogger().println(Messages.Queue_LabelHasNoNodes(ModelHyperlinkNote.encodeTo(label)));
+            } else {
+                listener.getLogger().println(Messages.Queue_AllNodesOffline(ModelHyperlinkNote.encodeTo(label)));
+            }
+        }
+
     }
 
     /**
@@ -132,8 +176,9 @@ public abstract class CauseOfBlockage {
             this.node = node;
         }
 
+        @Override
         public String getShortDescription() {
-            String name = (node.toComputer() != null) ? node.toComputer().getDisplayName() : node.getDisplayName();
+            String name = node.toComputer() != null ? node.toComputer().getDisplayName() : node.getDisplayName();
             return Messages.Queue_WaitingForNextAvailableExecutorOn(name);
         }
         
@@ -153,8 +198,15 @@ public abstract class CauseOfBlockage {
             this.label = label;
         }
 
+        @Override
         public String getShortDescription() {
             return Messages.Queue_WaitingForNextAvailableExecutorOn(label.getName());
         }
+
+        @Override
+        public void print(TaskListener listener) {
+            listener.getLogger().println(Messages.Queue_WaitingForNextAvailableExecutorOn(ModelHyperlinkNote.encodeTo(label)));
+        }
+
     }
 }

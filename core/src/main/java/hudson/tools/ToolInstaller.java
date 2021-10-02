@@ -28,24 +28,26 @@ import hudson.ExtensionPoint;
 import hudson.FilePath;
 import hudson.Util;
 import hudson.model.Describable;
-import jenkins.model.Jenkins;
 import hudson.model.Label;
 import hudson.model.Node;
 import hudson.model.TaskListener;
-
 import java.io.File;
 import java.io.IOException;
-
+import jenkins.model.Jenkins;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
  * An object which can ensure that a generic {@link ToolInstallation} in fact exists on a node.
+ * The properties can be added to {@link ToolInstallation} using the {@link InstallSourceProperty}.
  *
  * The subclass should have a {@link ToolInstallerDescriptor}.
  * A {@code config.jelly} should be provided to customize specific fields;
  * {@code <t:label xmlns:t="/hudson/tools"/>} to customize {@code label}.
  * @see <a href="http://wiki.jenkins-ci.org/display/JENKINS/Tool+Auto-Installation">Tool Auto-Installation</a>
  * @since 1.305
+ * @see InstallSourceProperty
  */
 public abstract class ToolInstaller implements Describable<ToolInstaller>, ExtensionPoint {
 
@@ -81,7 +83,7 @@ public abstract class ToolInstaller implements Describable<ToolInstaller>, Exten
      * (By default, just checks the label.)
      */
     public boolean appliesTo(Node node) {
-        Label l = Jenkins.getInstance().getLabel(label);
+        Label l = Jenkins.get().getLabel(label);
         return l == null || l.contains(node);
     }
 
@@ -95,7 +97,7 @@ public abstract class ToolInstaller implements Describable<ToolInstaller>, Exten
      * @return the (directory) path at which the tool can be found,
      *         typically coming from {@link #preferredLocation}
      * @throws IOException if installation fails
-     * @throws InterruptedException if communication with a slave is interrupted
+     * @throws InterruptedException if communication with a agent is interrupted
      */
     public abstract FilePath performInstallation(ToolInstallation tool, Node node, TaskListener log) throws IOException, InterruptedException;
 
@@ -126,7 +128,51 @@ public abstract class ToolInstaller implements Describable<ToolInstaller>, Exten
         return s != null ? s.replaceAll("[^A-Za-z0-9_.-]+", "_") : null;
     }
 
+    @Override
     public ToolInstallerDescriptor<?> getDescriptor() {
-        return (ToolInstallerDescriptor) Jenkins.getInstance().getDescriptorOrDie(getClass());
+        return (ToolInstallerDescriptor) Jenkins.get().getDescriptorOrDie(getClass());
+    }
+
+    @Restricted(NoExternalUse.class)
+    public static final class ToolInstallerList {
+         /**
+          * the list of {@link ToolInstallerEntry}
+          */
+        public ToolInstallerEntry [] list;
+    }
+
+    @Restricted(NoExternalUse.class)
+    public static final class ToolInstallerEntry {
+        /**
+         * the id of the of the release entry
+         */
+        public String id;
+        /**
+         * the name of the release entry
+         */
+        public String name;
+        /**
+         * the url of the release
+         */
+        public String url;
+
+        /**
+         * public default constructor needed by the JSON parser
+         */
+        public ToolInstallerEntry() {
+
+        }
+
+        /**
+         * The constructor
+         * @param id the id of the release
+         * @param name the name of the release
+         * @param url the URL of thr release
+         */
+        public ToolInstallerEntry (String id, String name, String url) {
+            this.id = id;
+            this.name = name;
+            this.url = url;
+        }
     }
 }

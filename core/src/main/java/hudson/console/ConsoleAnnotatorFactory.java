@@ -26,19 +26,17 @@ package hudson.console;
 import hudson.Extension;
 import hudson.ExtensionList;
 import hudson.ExtensionPoint;
-import jenkins.model.Jenkins;
 import hudson.model.Run;
-import hudson.util.TimeUnit2;
-import org.jvnet.tiger_types.Types;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
-import org.kohsuke.stapler.WebMethod;
-
-import javax.servlet.ServletException;
 import java.io.IOException;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.net.URL;
+import java.util.concurrent.TimeUnit;
+import javax.servlet.ServletException;
+import org.jvnet.tiger_types.Types;
+import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerResponse;
+import org.kohsuke.stapler.WebMethod;
 
 /**
  * Entry point to the {@link ConsoleAnnotator} extension point. This class creates a new instance
@@ -59,7 +57,7 @@ import java.net.URL;
  *
  * <h2>Behaviour, JavaScript, and CSS</h2>
  * <p>
- * {@link ConsoleNote} can have associated <tt>script.js</tt> and <tt>style.css</tt> (put them
+ * {@link ConsoleNote} can have associated {@code script.js} and {@code style.css} (put them
  * in the same resource directory that you normally put Jelly scripts), which will be loaded into
  * the HTML page whenever the console notes are used. This allows you to use minimal markup in
  * code generation, and do the styling in CSS and perform the rest of the interesting work as a CSS behaviour/JavaScript.
@@ -81,13 +79,13 @@ public abstract class ConsoleAnnotatorFactory<T> implements ExtensionPoint {
      * @return
      *      null if this factory is not going to participate in the annotation of this console.
      */
-    public abstract ConsoleAnnotator newInstance(T context);
+    public abstract ConsoleAnnotator<T> newInstance(T context);
 
     /**
      * For which context type does this annotator work?
      */
-    public Class type() {
-        Type type = Types.getBaseClass(getClass(), ConsoleAnnotator.class);
+    public Class<?> type() {
+        Type type = Types.getBaseClass(getClass(), ConsoleAnnotatorFactory.class);
         if (type instanceof ParameterizedType)
             return Types.erasure(Types.getTypeArgument(type,0));
         else
@@ -106,7 +104,7 @@ public abstract class ConsoleAnnotatorFactory<T> implements ExtensionPoint {
     }
 
     private URL getResource(String fileName) {
-        Class c = getClass();
+        Class<?> c = getClass();
         return c.getClassLoader().getResource(c.getName().replace('.','/').replace('$','/')+ fileName);
     }
 
@@ -115,18 +113,19 @@ public abstract class ConsoleAnnotatorFactory<T> implements ExtensionPoint {
      */
     @WebMethod(name="script.js")
     public void doScriptJs(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
-        rsp.serveFile(req, getResource("/script.js"), TimeUnit2.DAYS.toMillis(1));
+        rsp.serveFile(req, getResource("/script.js"), TimeUnit.DAYS.toMillis(1));
     }
 
     @WebMethod(name="style.css")
     public void doStyleCss(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
-        rsp.serveFile(req, getResource("/style.css"), TimeUnit2.DAYS.toMillis(1));
+        rsp.serveFile(req, getResource("/style.css"), TimeUnit.DAYS.toMillis(1));
     }
 
     /**
      * All the registered instances.
      */
+    @SuppressWarnings("rawtypes")
     public static ExtensionList<ConsoleAnnotatorFactory> all() {
-        return Jenkins.getInstance().getExtensionList(ConsoleAnnotatorFactory.class);
+        return ExtensionList.lookup(ConsoleAnnotatorFactory.class);
     }
 }

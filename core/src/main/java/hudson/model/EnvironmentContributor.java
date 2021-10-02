@@ -23,15 +23,13 @@
  */
 package hudson.model;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.EnvVars;
 import hudson.Extension;
 import hudson.ExtensionList;
 import hudson.ExtensionPoint;
 import hudson.scm.SCM;
-import jenkins.model.Jenkins;
-
 import java.io.IOException;
-import javax.annotation.Nonnull;
 
 /**
  * Contributes environment variables to builds.
@@ -42,10 +40,9 @@ import javax.annotation.Nonnull;
  * of {@link Job}s to compute values.
  *
  * <h2>Views</h2>
- * <h4>buildEnv.groovy/.jelly</h4>
- * <p>
+ * <h3>buildEnv.groovy/.jelly</h3>
  * When Jenkins displays the help page listing all the environment variables available for a build, it does
- * so by combining all the {@code buildEnv} views from this extension point. This view should use the &lt;t:buildEnvVar> tag
+ * so by combining all the {@code buildEnv} views from this extension point. This view should use the {@code <t:buildEnvVar>} tag
  * to render a variable.
  *
  * <p>
@@ -87,7 +84,7 @@ public abstract class EnvironmentContributor implements ExtensionPoint {
      * @param listener
      *      Connected to the build console. Can be used to report errors.
      */
-    public void buildEnvironmentFor(@Nonnull Run r, @Nonnull EnvVars envs, @Nonnull TaskListener listener) throws IOException, InterruptedException {}
+    public void buildEnvironmentFor(@NonNull Run r, @NonNull EnvVars envs, @NonNull TaskListener listener) throws IOException, InterruptedException {}
 
     /**
      * Contributes environment variables used for a job.
@@ -109,13 +106,13 @@ public abstract class EnvironmentContributor implements ExtensionPoint {
      *      Connected to the build console. Can be used to report errors.
      * @since 1.527
      */
-    public void buildEnvironmentFor(@Nonnull Job j, @Nonnull EnvVars envs, @Nonnull TaskListener listener) throws IOException, InterruptedException {}
+    public void buildEnvironmentFor(@NonNull Job j, @NonNull EnvVars envs, @NonNull TaskListener listener) throws IOException, InterruptedException {}
 
     /**
      * Returns all the registered {@link EnvironmentContributor}s.
      */
     public static ExtensionList<EnvironmentContributor> all() {
-        return Jenkins.getInstance().getExtensionList(EnvironmentContributor.class);
+        return ExtensionList.lookup(EnvironmentContributor.class);
     }
 
     /**
@@ -125,14 +122,17 @@ public abstract class EnvironmentContributor implements ExtensionPoint {
      */
     @Extension
     public static class EnvVarsHtml implements RootAction {
+        @Override
         public String getIconFileName() {
             return null;
         }
 
+        @Override
         public String getDisplayName() {
             return null;
         }
 
+        @Override
         public String getUrlName() {
             return "env-vars.html";
         }

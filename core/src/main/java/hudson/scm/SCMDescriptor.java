@@ -23,14 +23,20 @@
  */
 package hudson.scm;
 
-import hudson.model.Descriptor;
-import hudson.model.AbstractProject;
-
-import java.util.List;
-import java.util.Collections;
-import java.util.logging.Logger;
 import static java.util.logging.Level.WARNING;
+
+import hudson.RestrictedSince;
+import hudson.Util;
+import hudson.model.AbstractProject;
+import hudson.model.Descriptor;
+import hudson.model.Job;
 import java.lang.reflect.Field;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Logger;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * {@link Descriptor} for {@link SCM}.
@@ -45,15 +51,9 @@ public abstract class SCMDescriptor<T extends SCM> extends Descriptor<SCM> {
      * If this SCM has corresponding {@link RepositoryBrowser},
      * that type. Otherwise this SCM will not have any repository browser.
      */
-    public transient final Class<? extends RepositoryBrowser> repositoryBrowser;
-
-    /**
-     * Incremented every time a new {@link SCM} instance is created from this descriptor. 
-     * This is used to invalidate cache. Due to the lack of synchronization and serialization,
-     * this field doesn't really count the # of instances created to date,
-     * but it's good enough for the cache invalidation.
-     */
-    public volatile int generation = 1;
+    public final transient Class<? extends RepositoryBrowser> repositoryBrowser;
+    
+    private final transient AtomicInteger atomicGeneration = new AtomicInteger(1);
 
     protected SCMDescriptor(Class<T> clazz, Class<? extends RepositoryBrowser> repositoryBrowser) {
         super(clazz);
@@ -71,9 +71,32 @@ public abstract class SCMDescriptor<T extends SCM> extends Descriptor<SCM> {
         this.repositoryBrowser = repositoryBrowser;
     }
 
-    // work around HUDSON-4514. The repositoryBrowser field was marked as non-transient until 1.325,
+    /**
+     * Incremented every time a new {@link SCM} instance is created from this descriptor.
+     * This is used to invalidate cache of {@link SCM#getEffectiveBrowser}. Due to the lack of synchronization and serialization,
+     * this field doesn't really count the # of instances created to date,
+     * but it's good enough for the cache invalidation.
+     * @deprecated No longer used by default.
+     */
+    @Deprecated
+    @Restricted(NoExternalUse.class) @RestrictedSince("2.209")
+    public int getGeneration() {
+        return atomicGeneration.get();
+    }
+
+    /**
+     * Increments the generation value {@link SCMDescriptor#getGeneration} by one atomically.
+     * @deprecated No longer used by default.
+     */
+    @Deprecated
+    @Restricted(NoExternalUse.class) @RestrictedSince("2.209")
+    public void incrementGeneration() {
+        atomicGeneration.incrementAndGet();
+    }
+
+    // work around JENKINS-4514. The repositoryBrowser field was marked as non-transient until 1.325,
     // causing the field to be persisted and overwritten on the load method.
-    @SuppressWarnings({"ConstantConditions"})
+    @SuppressWarnings("ConstantConditions")
     @Override
     public void load() {
         Class<? extends RepositoryBrowser> rb = repositoryBrowser;
@@ -83,9 +106,7 @@ public abstract class SCMDescriptor<T extends SCM> extends Descriptor<SCM> {
                 Field f = SCMDescriptor.class.getDeclaredField("repositoryBrowser");
                 f.setAccessible(true);
                 f.set(this,rb);
-            } catch (NoSuchFieldException e) {
-                LOGGER.log(WARNING, "Failed to overwrite the repositoryBrowser field",e);
-            } catch (IllegalAccessException e) {
+            } catch (NoSuchFieldException | IllegalAccessException e) {
                 LOGGER.log(WARNING, "Failed to overwrite the repositoryBrowser field",e);
             }
         }
@@ -97,11 +118,13 @@ public abstract class SCMDescriptor<T extends SCM> extends Descriptor<SCM> {
      * <p>
      * Implementing this method allows Hudson to reuse {@link RepositoryBrowser}
      * configured for one project to be used for other "compatible" projects.
-     * 
+     * <p>{@link SCM#guessBrowser} is more robust since it does not require another project.
      * @return
      *      true if the two given SCM configurations are similar enough
      *      that they can reuse {@link RepositoryBrowser} between them.
+     * @deprecated No longer used by default. {@link SCM#getKey} could be used to implement similar features if needed.
      */
+    @Deprecated
     public boolean isBrowserReusable(T x, T y) {
         return false;
     }
@@ -111,12 +134,25 @@ public abstract class SCMDescriptor<T extends SCM> extends Descriptor<SCM> {
      *
      * <p>
      * When this method returns false, this {@link SCM} will not appear in the configuration screen
-     * for the given project. The default method always return true.
+     * for the given project. The default is true for {@link AbstractProject} but false for {@link Job}.
      *
-     * @since 1.294
+     * @since 1.568
      */
+    public boolean isApplicable(Job project) {
+        if (project instanceof AbstractProject) {
+            return isApplicable((AbstractProject) project);
+        } else {
+            return false;
+        }
+    }
+
+    @Deprecated
     public boolean isApplicable(AbstractProject project) {
-        return true;
+        if (Util.isOverridden(SCMDescriptor.class, getClass(), "isApplicable", Job.class)) {
+            return isApplicable((Job) project);
+        } else {
+            return true;
+        }
     }
 
     /**

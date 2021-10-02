@@ -23,20 +23,21 @@
  */
 package hudson.scheduler;
 
+import static java.util.Calendar.MONDAY;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
+
 import antlr.ANTLRException;
 import java.text.DateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.GregorianCalendar;
-import java.util.Locale;
-
-import static org.junit.Assert.*;
-import org.junit.Test;
-import org.jvnet.hudson.test.Bug;
-import org.jvnet.hudson.test.Url;
-
-import static java.util.Calendar.MONDAY;
 import java.util.List;
+import java.util.Locale;
+import java.util.TimeZone;
+import org.junit.Test;
+import org.jvnet.hudson.test.Issue;
 
 /**
  * @author Kohsuke Kawaguchi
@@ -81,7 +82,7 @@ public class CronTabTest {
     }
 
     @Test(timeout = 1000)
-    @Bug(12357)
+    @Issue("JENKINS-12357")
     public void testCeil3_DoW7() throws Exception {
         // similar to testCeil3, but DoW=7 may stuck in an infinite loop
         CronTab x = new CronTab("0 0 1 * 7");
@@ -93,7 +94,7 @@ public class CronTabTest {
     /**
      * Verifies that HUDSON-8656 never crops up again.
      */
-    @Url("http://issues.hudson-ci.org/browse/HUDSON-8656")
+    @Issue("HUDSON-8656") // This is _not_ JENKINS-8656
     @Test
     public void testCeil4() throws ANTLRException {
         final Calendar cal = Calendar.getInstance(new Locale("de", "de"));
@@ -115,7 +116,7 @@ public class CronTabTest {
     /**
      * Verifies that HUDSON-8656 never crops up again.
      */
-    @Url("http://issues.hudson-ci.org/browse/HUDSON-8656")
+    @Issue("HUDSON-8656") // This is _not_ JENKINS-8656
     @Test
     public void testCeil5() throws ANTLRException {
         final Calendar cal = Calendar.getInstance(new Locale("de", "at"));
@@ -162,7 +163,7 @@ public class CronTabTest {
         compare(new GregorianCalendar(2010,7,1,0,0),x.floor(c));
     }
 
-    @Bug(8401)
+    @Issue("JENKINS-8401")
     @Test
     public void testFloor4() throws Exception {
         // conflict between DoM and DoW. In this we need to find a day that's the first day of a month and Sunday in 2010
@@ -176,10 +177,10 @@ public class CronTabTest {
     }
 
     @Test public void checkSanity() throws Exception {
-        assertEquals(null, new CronTab("@hourly").checkSanity());
+        assertNull(new CronTab("@hourly").checkSanity());
         assertEquals(Messages.CronTab_do_you_really_mean_every_minute_when_you("* * * * *", "H * * * *"), new CronTab("* * * * *").checkSanity());
         assertEquals(Messages.CronTab_do_you_really_mean_every_minute_when_you("*/1 * * * *", "H * * * *"), new CronTab("*/1 * * * *").checkSanity());
-        assertEquals(null, new CronTab("H H(0-2) * * *", Hash.from("stuff")).checkSanity());
+        assertNull(new CronTab("H H(0-2) * * *", Hash.from("stuff")).checkSanity());
         assertEquals(Messages.CronTab_do_you_really_mean_every_minute_when_you("* 0 * * *", "H 0 * * *"), new CronTab("* 0 * * *").checkSanity());
         assertEquals(Messages.CronTab_do_you_really_mean_every_minute_when_you("* 6,18 * * *", "H 6,18 * * *"), new CronTab("* 6,18 * * *").checkSanity());
         // dubious; could be improved:
@@ -192,14 +193,14 @@ public class CronTabTest {
         // if the user specifically asked for 3:00 AM, probably we should stick to 3:00–3:59
         assertEquals(Messages.CronTab_spread_load_evenly_by_using_rather_than_("H 3 * * *", "0 3 * * *"), new CronTab("0 3 * * *").checkSanity());
         assertEquals(Messages.CronTab_spread_load_evenly_by_using_rather_than_("H 22 * * 6", "00 22 * * 6"), new CronTab("00 22 * * 6").checkSanity());
-        assertEquals(null, new CronTab("H/15 * 1 1 *").checkSanity());
-        assertEquals(null, new CronTab("0 3 H/15 * *").checkSanity());
+        assertNull(new CronTab("H/15 * 1 1 *").checkSanity());
+        assertNull(new CronTab("0 3 H/15 * *").checkSanity());
         assertEquals(Messages.CronTab_short_cycles_in_the_day_of_month_field_w(), new CronTab("0 3 H/3 * *").checkSanity());
         assertEquals(Messages.CronTab_short_cycles_in_the_day_of_month_field_w(), new CronTab("0 3 */5 * *").checkSanity());
     }
 
     /**
-     * Humans can't easily see difference in two {@link Calendar}s, do help the diagnosis by using {@link DateFormat}. 
+     * Humans can't easily see difference in two {@link Calendar}s, do help the diagnosis by using {@link DateFormat}.
      */
     private void compare(Calendar expected, Calendar actual) {
         DateFormat f = DateFormat.getDateTimeInstance();
@@ -209,6 +210,7 @@ public class CronTabTest {
     @Test
     public void testHash1() throws Exception {
         CronTab x = new CronTab("H H(5-8) H/3 H(1-10)/4 *",new Hash() {
+            @Override
             public int next(int n) {
                 return n-1;
             }
@@ -233,6 +235,7 @@ public class CronTabTest {
     @Test
     public void testHash2() throws Exception {
         CronTab x = new CronTab("H H(5-8) H/3 H(1-10)/4 *",new Hash() {
+            @Override
             public int next(int n) {
                 return 1;
             }
@@ -261,17 +264,13 @@ public class CronTabTest {
         compare(new GregorianCalendar(2013, 2, 21, 0, 2), new CronTab("H(0-15)/3 * * * *", Hash.from("junk")).ceil(new GregorianCalendar(2013, 2, 21, 0, 0)));
         compare(new GregorianCalendar(2013, 2, 21, 0, 2), new CronTab("H(0-3)/4 * * * *", Hash.from("junk")).ceil(new GregorianCalendar(2013, 2, 21, 0, 0)));
         compare(new GregorianCalendar(2013, 2, 21, 1, 2), new CronTab("H(0-3)/4 * * * *", Hash.from("junk")).ceil(new GregorianCalendar(2013, 2, 21, 0, 5)));
-        try {
-            compare(new GregorianCalendar(2013, 2, 21, 0, 0), new CronTab("H(0-3)/15 * * * *", Hash.from("junk")).ceil(new GregorianCalendar(2013, 2, 21, 0, 0)));
-            fail();
-        } catch (ANTLRException x) {
-            // good
-        }
+
+        assertThrows(ANTLRException.class, () -> compare(new GregorianCalendar(2013, 2, 21, 0, 0), new CronTab("H(0-3)/15 * * * *", Hash.from("junk")).ceil(new GregorianCalendar(2013, 2, 21, 0, 0))));
     }
 
     @Test public void repeatedHash() throws Exception {
         CronTabList tabs = CronTabList.create("H * * * *\nH * * * *", Hash.from("seed"));
-        List<Integer> times = new ArrayList<Integer>();
+        List<Integer> times = new ArrayList<>();
         for (int i = 0; i < 60; i++) {
             if (tabs.check(new GregorianCalendar(2013, 3, 3, 11, i, 0))) {
                 times.add(i);
@@ -280,4 +279,43 @@ public class CronTabTest {
         assertEquals("[35, 56]", times.toString());
     }
 
+    @Test public void rangeBoundsCheckOK() throws Exception {
+        new CronTab("H(0-59) H(0-23) H(1-31) H(1-12) H(0-7)");
+    }
+
+    @Test public void rangeBoundsCheckFailHour() {
+        assertThrows(ANTLRException.class, () -> new CronTab("H H(12-24) * * *"));
+    }
+
+    @Test public void rangeBoundsCheckFailMinute() {
+        assertThrows(ANTLRException.class, () -> new CronTab("H(33-66) * * * *"));
+    }
+
+    @Issue("JENKINS-9283")
+    @Test public void testTimezone() throws Exception {
+        CronTabList tabs = CronTabList.create("TZ=Australia/Sydney\nH * * * *\nH * * * *", Hash.from("seed"));
+        List<Integer> times = new ArrayList<>();
+        for (int i = 0; i < 60; i++) {
+            GregorianCalendar calendar = new GregorianCalendar(TimeZone.getTimeZone("UTC"));
+            calendar.set(2013, Calendar.APRIL, 3, 11, i, 0);
+            if (tabs.check(calendar)) {
+                times.add(i);
+            }
+        }
+        assertEquals("[35, 56]", times.toString());
+    }
+
+    @Issue("SECURITY-790")
+    @Test(timeout = 1000L) public void testLongMonths() throws Exception {
+        Calendar cal = Calendar.getInstance();
+        cal.set(Calendar.MONTH, Calendar.JULY);
+        new CronTab("0 0 31 7 *").floor(cal); // would infinite loop
+    }
+
+    @Issue("SECURITY-1193")
+    @Test(timeout = 1000L) public void testCeilLongMonths() throws Exception {
+        Calendar cal = Calendar.getInstance();
+        cal.set(Calendar.MONTH, Calendar.NOVEMBER);
+        new CronTab("0 0 31 * *").ceil(cal); // would infinite loop
+    }
 }

@@ -23,15 +23,14 @@
  */
 package hudson.tasks;
 
-import hudson.model.AbstractProject;
-import hudson.model.Descriptor;
-import jenkins.model.Jenkins;
-import hudson.model.AbstractProject.AbstractProjectDescriptor;
 import hudson.Extension;
+import hudson.model.AbstractProject;
+import hudson.model.AbstractProject.AbstractProjectDescriptor;
+import hudson.model.Descriptor;
 import hudson.util.DescriptorList;
-
 import java.util.ArrayList;
 import java.util.List;
+import jenkins.model.Jenkins;
 
 /**
  * List of all installed {@link BuildWrapper}.
@@ -44,7 +43,8 @@ public class BuildWrappers {
      *      as of 1.281. Use {@link Extension} for registration, and use {@link BuildWrapper#all()}
      *      for listing them.
      */
-    public static final List<Descriptor<BuildWrapper>> WRAPPERS = new DescriptorList<BuildWrapper>(BuildWrapper.class);
+    @Deprecated
+    public static final List<Descriptor<BuildWrapper>> WRAPPERS = new DescriptorList<>(BuildWrapper.class);
 
     /**
      * List up all {@link BuildWrapperDescriptor}s that are applicable for the given project.
@@ -54,8 +54,8 @@ public class BuildWrappers {
      *      with {@link BuildWrapper} implementations before 1.150.
      */
     public static List<Descriptor<BuildWrapper>> getFor(AbstractProject<?, ?> project) {
-        List<Descriptor<BuildWrapper>> result = new ArrayList<Descriptor<BuildWrapper>>();
-        Descriptor pd = Jenkins.getInstance().getDescriptor((Class)project.getClass());
+        List<Descriptor<BuildWrapper>> result = new ArrayList<>();
+        Descriptor pd = Jenkins.get().getDescriptor((Class)project.getClass());
 
         for (Descriptor<BuildWrapper> w : BuildWrapper.all()) {
             if (pd instanceof AbstractProjectDescriptor && !((AbstractProjectDescriptor)pd).isApplicable(w))

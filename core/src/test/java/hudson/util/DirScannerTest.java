@@ -23,21 +23,25 @@
  */
 package hudson.util;
 
-import java.io.File;
-import java.io.IOException;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 
 import hudson.FilePath;
-import hudson.Util;
-
-import junit.framework.TestCase;
+import java.io.File;
+import java.io.IOException;
+import org.junit.Rule;
+import org.junit.Test;
+import org.junit.rules.TemporaryFolder;
 
 /**
  * @author Christoph Thelen
  */
-public class DirScannerTest extends TestCase {
+public class DirScannerTest {
 
-    public void testGlobShouldUseDefaultExcludes() throws Exception {
-        FilePath tmp = new FilePath(Util.createTempDir());
+    @Rule public TemporaryFolder tmpRule = new TemporaryFolder();
+
+    @Test public void globShouldUseDefaultExcludes() throws Exception {
+        FilePath tmp = new FilePath(tmpRule.getRoot());
         try {
             tmp.child(".gitignore").touch(0);
             FilePath git = tmp.child(".git");
@@ -59,8 +63,8 @@ public class DirScannerTest extends TestCase {
         }
     }
     
-    public void testGlobShouldIgnoreDefaultExcludesByRequest() throws Exception {
-        FilePath tmp = new FilePath(Util.createTempDir());
+    @Test public void globShouldIgnoreDefaultExcludesByRequest() throws Exception {
+        FilePath tmp = new FilePath(tmpRule.getRoot());
         try {
             tmp.child(".gitignore").touch(0);
             FilePath git = tmp.child(".git");
@@ -87,10 +91,11 @@ public class DirScannerTest extends TestCase {
         
         public final String filename;
         
-        public MatchingFileVisitor(String filename) {
+        MatchingFileVisitor(String filename) {
             this.filename = filename;
         }
     
+        @Override
         public void visit(File f, String relativePath) throws IOException {
             if (relativePath.endsWith(filename)) {
                 found = true;

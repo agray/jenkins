@@ -23,16 +23,17 @@
  */
 package hudson;
 
-import jenkins.YesNoMaybe;
-import net.java.sezpoz.Indexable;
+import static java.lang.annotation.ElementType.FIELD;
+import static java.lang.annotation.ElementType.METHOD;
+import static java.lang.annotation.ElementType.TYPE;
+import static java.lang.annotation.RetentionPolicy.RUNTIME;
+import static jenkins.YesNoMaybe.MAYBE;
 
 import java.lang.annotation.Documented;
 import java.lang.annotation.Retention;
 import java.lang.annotation.Target;
-
-import static java.lang.annotation.ElementType.*;
-import static java.lang.annotation.RetentionPolicy.RUNTIME;
-import static jenkins.YesNoMaybe.MAYBE;
+import jenkins.YesNoMaybe;
+import net.java.sezpoz.Indexable;
 
 /**
  * Marks a field, a method, or a class for automatic discovery, so that Hudson can locate
@@ -74,7 +75,8 @@ public @interface Extension {
     /**
      * Used for sorting extensions.
      *
-     * Extensions will be sorted in the descending order of the ordinal.
+     * Extensions will be sorted in the descending order of the ordinal. In other words,
+     * the extensions with the highest numbers will be chosen first.
      * This is a rather poor approach to the problem, so its use is generally discouraged.
      *
      * @since 1.306

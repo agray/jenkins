@@ -23,15 +23,18 @@
  */
 package hudson.slaves;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+
 import hudson.BulkChange;
 import hudson.Launcher;
-import hudson.model.*;
-import hudson.slaves.NodeProvisioner.NodeProvisionerInvoker;
+import hudson.model.AbstractBuild;
+import hudson.model.BuildListener;
+import hudson.model.FreeStyleBuild;
+import hudson.model.FreeStyleProject;
+import hudson.model.Label;
+import hudson.model.Result;
 import hudson.tasks.Builder;
-
-import org.jvnet.hudson.test.HudsonTestCase;
-import org.jvnet.hudson.test.SleepBuilder;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -40,31 +43,17 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.SleepBuilder;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class NodeProvisionerTest extends HudsonTestCase {
-    private int original;
+public class NodeProvisionerTest {
 
-    @Override
-    protected void setUp() throws Exception {
-        original = LoadStatistics.CLOCK;
-        LoadStatistics.CLOCK = 10; // run x1000 the regular speed to speed up the test
-        NodeProvisionerInvoker.INITIALDELAY = 100;
-        NodeProvisionerInvoker.RECURRENCEPERIOD = 10;
-        super.setUp();
-    }
-
-    @Override
-    protected void tearDown() throws Exception {
-        super.tearDown();
-        LoadStatistics.CLOCK = original;
-        NodeProvisionerInvoker.INITIALDELAY = original*10;
-        NodeProvisionerInvoker.RECURRENCEPERIOD = original;
-    }
-
-    public void testDummy() {} // just to make Surefire happy
+    @Rule public JenkinsRule r = new NodeProvisionerRule(/* run x1000 the regular speed to speed up the test */10, 100, 10);
 
     /**
      * Latch synchronization primitive that waits for N thread to pass the checkpoint.
@@ -91,6 +80,7 @@ public class NodeProvisionerTest extends HudsonTestCase {
          */
         public Builder createBuilder() {
             return new Builder() {
+                @Override
                 public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) throws InterruptedException, IOException {
                     block();
                     return true;
@@ -100,11 +90,11 @@ public class NodeProvisionerTest extends HudsonTestCase {
     }
 
     /**
-     * Scenario: schedule a build and see if one slave is provisioned.
+     * Scenario: schedule a build and see if one agent is provisioned.
      */
-    public void _testAutoProvision() throws Exception {// excluded since it's fragile
-        BulkChange bc = new BulkChange(jenkins);
-        try {
+    // TODO fragile
+    @Test public void autoProvision() throws Exception {
+        try (BulkChange bc = new BulkChange(r.jenkins)) {
             DummyCloudImpl cloud = initHudson(10);
 
 
@@ -115,17 +105,15 @@ public class NodeProvisionerTest extends HudsonTestCase {
 
             // since there's only one job, we expect there to be just one slave
             assertEquals(1,cloud.numProvisioned);
-        } finally {
-            bc.abort();
         }
     }
 
     /**
      * Scenario: we got a lot of jobs all of the sudden, and we need to fire up a few nodes.
      */
-    public void _testLoadSpike() throws Exception {// excluded since it's fragile
-        BulkChange bc = new BulkChange(jenkins);
-        try {
+    // TODO fragile
+    @Test public void loadSpike() throws Exception {
+        try (BulkChange bc = new BulkChange(r.jenkins)) {
             DummyCloudImpl cloud = initHudson(0);
 
             verifySuccessfulCompletion(buildAll(create5SlowJobs(new Latch(5))));
@@ -133,40 +121,36 @@ public class NodeProvisionerTest extends HudsonTestCase {
             // the time it takes to complete a job is eternally long compared to the time it takes to launch
             // a new slave, so in this scenario we end up allocating 5 slaves for 5 jobs.
             assertEquals(5,cloud.numProvisioned);
-        } finally {
-            bc.abort();
         }
     }
 
     /**
-     * Scenario: make sure we take advantage of statically configured slaves.
+     * Scenario: make sure we take advantage of statically configured agents.
      */
-    public void _testBaselineSlaveUsage() throws Exception {// excluded since it's fragile
-        BulkChange bc = new BulkChange(jenkins);
-        try {
+    // TODO fragile
+    @Test public void baselineSlaveUsage() throws Exception {
+        try (BulkChange bc = new BulkChange(r.jenkins)) {
             DummyCloudImpl cloud = initHudson(0);
-            // add slaves statically upfront
-            createSlave().toComputer().connect(false).get();
-            createSlave().toComputer().connect(false).get();
+            // add agents statically upfront
+            r.createSlave().toComputer().connect(false).get();
+            r.createSlave().toComputer().connect(false).get();
 
             verifySuccessfulCompletion(buildAll(create5SlowJobs(new Latch(5))));
 
             // we should have used two static slaves, thus only 3 slaves should have been provisioned
             assertEquals(3,cloud.numProvisioned);
-        } finally {
-            bc.abort();
         }
     }
 
     /**
      * Scenario: loads on one label shouldn't translate to load on another label.
      */
-    public void _testLabels() throws Exception {// excluded since it's fragile
-        BulkChange bc = new BulkChange(jenkins);
-        try {
+    // TODO fragile
+    @Test public void labels() throws Exception {
+        try (BulkChange bc = new BulkChange(r.jenkins)) {
             DummyCloudImpl cloud = initHudson(0);
-            Label blue = jenkins.getLabel("blue");
-            Label red = jenkins.getLabel("red");
+            Label blue = r.jenkins.getLabel("blue");
+            Label red = r.jenkins.getLabel("red");
             cloud.label = red;
 
             // red jobs
@@ -189,34 +173,32 @@ public class NodeProvisionerTest extends HudsonTestCase {
             // and all blue jobs should be still stuck in the queue
             for (Future<FreeStyleBuild> bb : blueBuilds)
                 assertFalse(bb.isDone());
-        } finally {
-            bc.abort();
         }
     }
 
 
     private FreeStyleProject createJob(Builder builder) throws IOException {
-        FreeStyleProject p = createFreeStyleProject();
-        p.setAssignedLabel(null);   // let it roam free, or else it ties itself to the master since we have no slaves
+        FreeStyleProject p = r.createFreeStyleProject();
+        p.setAssignedLabel(null);   // let it roam free, or else it ties itself to the built-in node since we have no agents
         p.getBuildersList().add(builder);
         return p;
     }
 
     private DummyCloudImpl initHudson(int delay) throws IOException {
         // start a dummy service
-        DummyCloudImpl cloud = new DummyCloudImpl(this, delay);
-        jenkins.clouds.add(cloud);
+        DummyCloudImpl cloud = new DummyCloudImpl(r, delay);
+        r.jenkins.clouds.add(cloud);
 
-        // no build on the master, to make sure we get everything from the cloud
-        jenkins.setNumExecutors(0);
-        jenkins.setNodes(Collections.<Node>emptyList());
+        // no build on the built-in node, to make sure we get everything from the cloud
+        r.jenkins.setNumExecutors(0);
+        r.jenkins.setNodes(Collections.emptyList());
         return cloud;
     }
 
     private List<FreeStyleProject> create5SlowJobs(Latch l) throws IOException {
-        List<FreeStyleProject> jobs = new ArrayList<FreeStyleProject>();
+        List<FreeStyleProject> jobs = new ArrayList<>();
         for( int i=0; i<l.init; i++)
-            //set a large delay, to simulate the situation where we need to provision more slaves
+            //set a large delay, to simulate the situation where we need to provision more agents
             // to keep up with the load
             jobs.add(createJob(l.createBuilder()));
         return jobs;
@@ -227,7 +209,7 @@ public class NodeProvisionerTest extends HudsonTestCase {
      */
     private List<Future<FreeStyleBuild>> buildAll(List<FreeStyleProject> jobs) {
         System.out.println("Scheduling builds for "+jobs.size()+" jobs");
-        List<Future<FreeStyleBuild>> builds = new ArrayList<Future<FreeStyleBuild>>();
+        List<Future<FreeStyleBuild>> builds = new ArrayList<>();
         for (FreeStyleProject job : jobs)
             builds.add(job.scheduleBuild2(0));
         return builds;
@@ -237,7 +219,7 @@ public class NodeProvisionerTest extends HudsonTestCase {
         System.out.println("Waiting for a completion");
         for (Future<FreeStyleBuild> f : builds) {
             try {
-                assertBuildStatus(Result.SUCCESS, f.get(90, TimeUnit.SECONDS));
+                r.assertBuildStatus(Result.SUCCESS, f.get(90, TimeUnit.SECONDS));
             } catch (TimeoutException e) {
                 // time out so that the automated test won't hang forever, even when we have bugs
                 System.out.println("Build didn't complete in time");

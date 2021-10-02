@@ -24,35 +24,47 @@
 package hudson.scm;
 
 import hudson.model.AbstractBuild;
-import hudson.model.TaskAction;
 import hudson.model.BuildBadgeAction;
 import hudson.model.Run;
-import hudson.security.Permission;
+import hudson.model.TaskAction;
 import hudson.security.ACL;
+import hudson.security.Permission;
+import java.io.IOException;
+import javax.servlet.ServletException;
+import jenkins.model.RunAction2;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
 
-import javax.servlet.ServletException;
-import java.io.IOException;
-import jenkins.model.RunAction2;
-
 /**
- * Common part of <tt>CVSSCM.TagAction</tt> and <tt>SubversionTagAction</tt>.
+ * Common part of {@code CVSSCM.TagAction} and {@code SubversionTagAction}.
  *
  * <p>
  * This class implements the action that tags the modules. Derived classes
- * need to provide <tt>tagForm.jelly</tt> view that displays a form for
+ * need to provide {@code tagForm.jelly} view that displays a form for
  * letting user start tagging.
  *
  * @author Kohsuke Kawaguchi
  */
 public abstract class AbstractScmTagAction extends TaskAction implements BuildBadgeAction, RunAction2 {
+
+    private transient /*final*/ Run<?,?> run;
+    @Deprecated
     protected transient /*final*/ AbstractBuild build;
 
-    protected AbstractScmTagAction(AbstractBuild build) {
-        this.build = build;
+    /**
+     * @since 1.568
+     */
+    protected AbstractScmTagAction(Run<?,?> run) {
+        this.run = run;
+        this.build = run instanceof AbstractBuild ? (AbstractBuild) run : null;
     }
 
+    @Deprecated
+    protected AbstractScmTagAction(AbstractBuild build) {
+        this((Run) build);
+    }
+
+    @Override
     public final String getUrlName() {
         // to make this consistent with CVSSCM, even though the name is bit off
         return "tagBuild";
@@ -61,10 +73,19 @@ public abstract class AbstractScmTagAction extends TaskAction implements BuildBa
     /**
      * Defaults to {@link SCM#TAG}.
      */
+    @Override
     protected Permission getPermission() {
         return SCM.TAG;
     }
 
+    /**
+     * @since 1.568
+     */
+    public Run<?,?> getRun() {
+        return run;
+    }
+
+    @Deprecated
     public AbstractBuild getBuild() {
         return build;
     }
@@ -81,8 +102,9 @@ public abstract class AbstractScmTagAction extends TaskAction implements BuildBa
      */
     public abstract boolean isTagged();
 
+    @Override
     protected ACL getACL() {
-        return build.getACL();
+        return run.getACL();
     }
 
     public void doIndex(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
@@ -100,7 +122,8 @@ public abstract class AbstractScmTagAction extends TaskAction implements BuildBa
     }
 
     @Override public void onLoad(Run<?, ?> r) {
-        build = (AbstractBuild) r;
+        run = r;
+        build = run instanceof AbstractBuild ? (AbstractBuild) run : null;
     }
 
 }

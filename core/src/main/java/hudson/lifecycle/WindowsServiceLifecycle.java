@@ -23,24 +23,23 @@
  */
 package hudson.lifecycle;
 
-import hudson.FilePath;
-import hudson.Launcher.LocalLauncher;
-import hudson.Util;
-import jenkins.model.Jenkins;
-import hudson.util.StreamTaskListener;
-import hudson.util.jna.Kernel32;
 import static hudson.util.jna.Kernel32.MOVEFILE_DELAY_UNTIL_REBOOT;
 import static hudson.util.jna.Kernel32.MOVEFILE_REPLACE_EXISTING;
 
-import org.apache.commons.io.FileUtils;
-import org.apache.commons.io.output.ByteArrayOutputStream;
-
+import hudson.FilePath;
+import hudson.Launcher.LocalLauncher;
+import hudson.Util;
+import hudson.util.StreamTaskListener;
+import hudson.util.jna.Kernel32;
 import java.io.File;
-import java.io.IOException;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.net.URL;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import jenkins.model.Jenkins;
+import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.output.ByteArrayOutputStream;
 
 /**
  * {@link Lifecycle} for Hudson installed as Windows service.
@@ -54,26 +53,26 @@ public class WindowsServiceLifecycle extends Lifecycle {
     }
 
     /**
-     * If <tt>jenkins.exe</tt> is old compared to our copy,
+     * If {@code jenkins.exe} is old compared to our copy,
      * schedule an overwrite (except that since it's currently running,
      * we can only do it when Jenkins restarts next time.)
      */
     private void updateJenkinsExeIfNeeded() {
         try {
-            File rootDir = Jenkins.getInstance().getRootDir();
+            File baseDir = getBaseDir();
 
             URL exe = getClass().getResource("/windows-service/jenkins.exe");
             String ourCopy = Util.getDigestOf(exe.openStream());
 
             for (String name : new String[]{"hudson.exe","jenkins.exe"}) {
                 try {
-                    File currentCopy = new File(rootDir,name);
+                    File currentCopy = new File(baseDir,name);
                     if(!currentCopy.exists())   continue;
                     String curCopy = new FilePath(currentCopy).digest();
 
                     if(ourCopy.equals(curCopy))     continue; // identical
 
-                    File stage = new File(rootDir,name+".new");
+                    File stage = new File(baseDir,name+".new");
                     FileUtils.copyURLToFile(exe,stage);
                     Kernel32.INSTANCE.MoveFileExA(stage.getAbsolutePath(),currentCopy.getAbsolutePath(),MOVEFILE_DELAY_UNTIL_REBOOT|MOVEFILE_REPLACE_EXISTING);
                     LOGGER.info("Scheduled a replacement of "+name);
@@ -107,19 +106,25 @@ public class WindowsServiceLifecycle extends Lifecycle {
         String baseName = dest.getName();
         baseName = baseName.substring(0,baseName.indexOf('.'));
 
-        File rootDir = Jenkins.getInstance().getRootDir();
-        File copyFiles = new File(rootDir,baseName+".copies");
+        File baseDir = getBaseDir();
+        File copyFiles = new File(baseDir,baseName+".copies");
 
-        FileWriter w = new FileWriter(copyFiles, true);
-        try {
-            w.write(by.getAbsolutePath()+'>'+getHudsonWar().getAbsolutePath()+'\n');
-        } finally {
-            w.close();
+        try (FileWriter w = new FileWriter(copyFiles, true)) {
+            w.write(by.getAbsolutePath() + '>' + getHudsonWar().getAbsolutePath() + '\n');
         }
     }
 
     @Override
     public void restart() throws IOException, InterruptedException {
+        Jenkins jenkins = Jenkins.getInstanceOrNull();
+        try {
+            if (jenkins != null) {
+                jenkins.cleanUp();
+            }
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to clean up. Restart will continue.", e);
+        }
+
         File me = getHudsonWar();
         File home = me.getParentFile();
 
@@ -137,6 +142,19 @@ public class WindowsServiceLifecycle extends Lifecycle {
                 .stdout(task).pwd(home).join();
         if(r!=0)
             throw new IOException(baos.toString());
+    }
+    
+    private static File getBaseDir() {
+        File baseDir;
+        
+        String baseEnv = System.getenv("BASE");
+        if (baseEnv != null) {
+            baseDir = new File(baseEnv);
+        } else {
+            LOGGER.log(Level.WARNING, "Could not find environment variable 'BASE' for Jenkins base directory. Falling back to JENKINS_HOME");
+            baseDir = Jenkins.get().getRootDir();
+        }
+        return baseDir;
     }
 
     private static final Logger LOGGER = Logger.getLogger(WindowsServiceLifecycle.class.getName());

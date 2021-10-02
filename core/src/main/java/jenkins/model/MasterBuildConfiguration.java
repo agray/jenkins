@@ -25,34 +25,39 @@ package jenkins.model;
 
 import hudson.Extension;
 import hudson.model.Node.Mode;
+import java.io.IOException;
 import net.sf.json.JSONObject;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.StaplerRequest;
 
-import java.io.IOException;
-
 /**
- * Adds the configuration regarding building on master.
+ * Adds the configuration regarding building on the built-in node.
  *
  * @author Kohsuke Kawaguchi
  */
-@Extension(ordinal=500)
+@Extension(ordinal=500) @Symbol({"builtInNode", "masterBuild"})
 public class MasterBuildConfiguration extends GlobalConfiguration {
     public int getNumExecutors() {
-        return Jenkins.getInstance().getNumExecutors();
+        return Jenkins.get().getNumExecutors();
     }
 
     public String getLabelString() {
-        return Jenkins.getInstance().getLabelString();
+        return Jenkins.get().getLabelString();
     }
 
     @Override
     public boolean configure(StaplerRequest req, JSONObject json) throws FormException {
-        Jenkins j = Jenkins.getInstance();
+        Jenkins j = Jenkins.get();
         try {
             // for compatibility reasons, this value is stored in Jenkins
+            String num = json.getString("numExecutors");
+            if (!num.matches("\\d+")) {
+                throw new FormException(Messages.Hudson_Computer_IncorrectNumberOfExecutors(),"numExecutors");
+            }
+            
             j.setNumExecutors(json.getInt("numExecutors"));
-            if (req.hasParameter("master.mode"))
-                j.setMode(Mode.valueOf(req.getParameter("master.mode")));
+            if (req.hasParameter("builtin.mode"))
+                j.setMode(Mode.valueOf(req.getParameter("builtin.mode")));
             else
                 j.setMode(Mode.NORMAL);
 
@@ -64,4 +69,3 @@ public class MasterBuildConfiguration extends GlobalConfiguration {
         }
     }
 }
-

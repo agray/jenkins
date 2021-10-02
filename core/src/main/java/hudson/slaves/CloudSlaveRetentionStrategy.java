@@ -1,27 +1,30 @@
 package hudson.slaves;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.model.Computer;
 import hudson.model.Node;
-import hudson.util.TimeUnit2;
-import jenkins.model.Jenkins;
-
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import jenkins.model.Jenkins;
+import jenkins.util.SystemProperties;
+import net.jcip.annotations.GuardedBy;
 
 /**
- * Default convenience implementation of {@link RetentionStrategy} for slaves provisioned from {@link Cloud}.
+ * Default convenience implementation of {@link RetentionStrategy} for agents provisioned from {@link Cloud}.
  *
- * If a slave is idle for 10 mins, this retention strategy will remove the slave. This can be used as-is for
+ * If an agent is idle for 10 mins, this retention strategy will remove the agent. This can be used as-is for
  * a {@link Node} provisioned by cloud to implement the auto-scaling semantics, it can be subtyped to tweak
  * the behavior, or it can be used as an example.
- *
+ * <p>TODO {@link CloudRetentionStrategy} seems to be a better implementation.
  * @author Kohsuke Kawaguchi
  * @since 1.510
  */
 public class CloudSlaveRetentionStrategy<T extends Computer> extends RetentionStrategy<T> {
 
     @Override
+    @GuardedBy("hudson.model.Queue.lock")
     public long check(T c) {
         if (!c.isConnecting() && c.isAcceptingTasks()) {
             if (isIdleForTooLong(c)) {
@@ -44,7 +47,7 @@ public class CloudSlaveRetentionStrategy<T extends Computer> extends RetentionSt
      * To actually deallocate the resource tied to this {@link Node}, implement {@link Computer#onRemoved()}.
      */
     protected void kill(Node n) throws IOException {
-        Jenkins.getInstance().removeNode(n);
+        Jenkins.get().removeNode(n);
     }
 
     /**
@@ -62,14 +65,15 @@ public class CloudSlaveRetentionStrategy<T extends Computer> extends RetentionSt
     }
 
     /**
-     * If the computer has been idle longer than this time, we'll kill the slave.
+     * If the computer has been idle longer than this time, we'll kill the agent.
      */
     protected long getIdleMaxTime() {
         return TIMEOUT;
     }
 
     // for debugging, it's convenient to be able to reduce this time
-    public static long TIMEOUT = Long.getLong(CloudSlaveRetentionStrategy.class.getName()+".timeout", TimeUnit2.MINUTES.toMillis(10));
+    @SuppressFBWarnings("MS_SHOULD_BE_FINAL")
+    public static long TIMEOUT = SystemProperties.getLong(CloudSlaveRetentionStrategy.class.getName()+".timeout", TimeUnit.MINUTES.toMillis(10));
 
     private static final Logger LOGGER = Logger.getLogger(CloudSlaveRetentionStrategy.class.getName());
 }

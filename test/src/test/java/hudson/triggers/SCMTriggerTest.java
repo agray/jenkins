@@ -23,45 +23,58 @@
  */
 package hudson.triggers;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.ExtensionList;
 import hudson.FilePath;
 import hudson.Launcher;
-import hudson.util.OneShotEvent;
-import hudson.util.StreamTaskListener;
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.BuildListener;
 import hudson.model.Cause;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
+import hudson.model.Item;
 import hudson.model.TaskListener;
-import hudson.model.Cause.UserCause;
 import hudson.scm.NullSCM;
-import hudson.scm.PollingResult;
-import hudson.scm.PollingResult.Change;
-import hudson.scm.RepositoryBrowser;
-import hudson.scm.SCMDescriptor;
-import hudson.scm.SCMRevisionState;
-import hudson.triggers.SCMTrigger.SCMTriggerCause;
 import hudson.triggers.SCMTrigger.BuildAction;
-import org.jvnet.hudson.test.Bug;
-import org.jvnet.hudson.test.HudsonTestCase;
-import org.jvnet.hudson.test.SingleFileSCM;
-import org.jvnet.hudson.test.TestBuilder;
+import hudson.triggers.SCMTrigger.SCMTriggerCause;
+import hudson.util.OneShotEvent;
+import hudson.util.StreamTaskListener;
 import java.io.File;
 import java.io.IOException;
-import java.util.concurrent.Future;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.Future;
+import jenkins.scm.SCMDecisionHandler;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.TestBuilder;
+import org.jvnet.hudson.test.TestExtension;
+
 /**
  * @author Alan Harder
  */
-public class SCMTriggerTest extends HudsonTestCase {
+public class SCMTriggerTest {
+
+    @Rule
+    public JenkinsRule j = new JenkinsRule();
+
     /**
      * Make sure that SCMTrigger doesn't trigger another build when a build has just started,
      * but not yet completed its SCM update.
      */
-    @Bug(2671)
-    public void testSimultaneousPollAndBuild() throws Exception {
-        FreeStyleProject p = createFreeStyleProject();
+    @Test
+    @Issue("JENKINS-2671")
+    public void simultaneousPollAndBuild() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject();
 
         // used to coordinate polling and check out
         final OneShotEvent checkoutStarted = new OneShotEvent();
@@ -74,16 +87,38 @@ public class SCMTriggerTest extends HudsonTestCase {
         build.get();  // let mock build finish
     }
 
+    /**
+     * Make sure that SCMTrigger doesn't poll when there is a polling veto in place.
+     */
+    @Test
+    @Issue("JENKINS-36123")
+    public void pollingExcludedByExtensionPoint() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject();
+
+        PollDecisionHandlerImpl handler =
+                ExtensionList.lookup(SCMDecisionHandler.class).get(PollDecisionHandlerImpl.class);
+        handler.blacklist.add(p);
+
+        // used to coordinate polling and check out
+        final OneShotEvent checkoutStarted = new OneShotEvent();
+
+        p.setScm(new TestSCM(checkoutStarted));
+
+        assertFalse("SCM-poll with blacklist should report no changes", p.pollSCMChanges(StreamTaskListener.fromStdout()));
+        handler.blacklist.remove(p);
+        assertTrue("SCM-poll with blacklist removed should report changes", p.pollSCMChanges(StreamTaskListener.fromStdout()));
+    }
+
     private static class TestSCM extends NullSCM {
         private volatile int myRev = 1;
         private final OneShotEvent checkoutStarted;
 
-        public TestSCM(OneShotEvent checkoutStarted) {
+        TestSCM(OneShotEvent checkoutStarted) {
             this.checkoutStarted = checkoutStarted;
         }
 
-        @Override synchronized
-        public boolean pollChanges(AbstractProject project, Launcher launcher, FilePath dir, TaskListener listener) throws IOException {
+        @Override
+        public synchronized boolean pollChanges(AbstractProject project, Launcher launcher, FilePath dir, TaskListener listener) {
             return myRev < 2;
         }
 
@@ -99,14 +134,16 @@ public class SCMTriggerTest extends HudsonTestCase {
     /**
      * Make sure that only one polling result shows up per build.
      */
-    @Bug(7649)
-    public void testMultiplePollingOneBuildAction() throws Exception {
+    @Test
+    @Issue("JENKINS-7649")
+    public void multiplePollingOneBuildAction() throws Exception {
         final OneShotEvent buildStarted = new OneShotEvent();
         final OneShotEvent buildShouldComplete = new OneShotEvent();
-        FreeStyleProject p = createFreeStyleProject();
+        FreeStyleProject p = j.createFreeStyleProject();
         // Make build sleep a while so it blocks new builds
         p.getBuildersList().add(new TestBuilder() {
-            public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) throws InterruptedException, IOException {
+            @Override
+            public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) throws InterruptedException {
                 buildStarted.signal();
                 buildShouldComplete.block();
                 return true;
@@ -118,11 +155,11 @@ public class SCMTriggerTest extends HudsonTestCase {
         p.addTrigger(t);
 
         // Start one build to block others
-        assertTrue(p.scheduleBuild(new UserCause()));
+        assertTrue(p.scheduleBuild(new Cause.UserCause()));
         buildStarted.block(); // wait for the build to really start
 
         // Schedule a new build, and trigger it many ways while it sits in queue
-        Future<FreeStyleBuild> fb = p.scheduleBuild2(0, new UserCause());
+        Future<FreeStyleBuild> fb = p.scheduleBuild2(0, new Cause.UserCause());
         assertNotNull(fb);
         assertTrue(p.scheduleBuild(new SCMTriggerCause("First poll")));
         assertTrue(p.scheduleBuild(new SCMTriggerCause("Second poll")));
@@ -134,7 +171,17 @@ public class SCMTriggerTest extends HudsonTestCase {
 
         List<BuildAction> ba = build.getActions(BuildAction.class);
 
-        assertFalse("There should only be one BuildAction.", ba.size()!=1);
+        assertEquals("There should only be one BuildAction.", 1, ba.size());
+    }
+
+    @TestExtension
+    public static class PollDecisionHandlerImpl extends SCMDecisionHandler {
+
+        Set<Item> blacklist = new HashSet<>();
+
+        @Override
+        public boolean shouldPoll(@NonNull Item item) {
+            return !blacklist.contains(item);
+        }
     }
 }
-

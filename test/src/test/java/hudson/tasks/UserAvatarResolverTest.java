@@ -23,49 +23,62 @@
  */
 package hudson.tasks;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.endsWith;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+
 import hudson.Extension;
 import hudson.model.User;
-
 import java.util.regex.Matcher;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.WithoutJenkins;
 
-import org.jvnet.hudson.test.HudsonTestCase;
+public class UserAvatarResolverTest {
 
-public class UserAvatarResolverTest extends HudsonTestCase {
+    @Rule
+    public JenkinsRule j = new JenkinsRule();
 
     private static User expUser;
-    
-    public void testThatDefaultImageIsReturnedIfRegexFails() {
-        String avatar = UserAvatarResolver.resolve(User.get("USER"), "meh");
-        assertTrue(avatar.endsWith("/images/meh/user.png"));
-    }
-    
-    public void testThatResolverIsUsed() {
-        expUser = User.get("unique-user-not-used-in-anyother-test", true);
-        String avatar = UserAvatarResolver.resolve(expUser, "20x20");
-        assertEquals(avatar, "http://myown.image");
-    }
-    
-    public void testThatNoResolverCanFindAvatar() {
-        String avatar = UserAvatarResolver.resolve(User.get("USER"), "20x20");
-        assertTrue(avatar.endsWith("/images/20x20/user.png"));
+
+    @Test
+    public void defaultImageIsReturnedIfRegexFails() {
+        String avatar = UserAvatarResolver.resolve(User.getOrCreateByIdOrFullName("USER"), "meh");
+        assertThat(avatar, endsWith("/images/svgs/person.svg"));
     }
 
-    public void testIconSizeRegex() {
+    @Test
+    public void resolverIsUsed() {
+        expUser = User.getOrCreateByIdOrFullName("unique-user-not-used-in-anyother-test");
+        String avatar = UserAvatarResolver.resolve(expUser, "20x20");
+        assertEquals("http://myown.image", avatar);
+    }
+
+    @Test
+    public void noResolverCanFindAvatar() {
+        String avatar = UserAvatarResolver.resolve(User.getOrCreateByIdOrFullName("USER"), "20x20");
+        assertThat(avatar, endsWith("/images/svgs/person.svg"));
+    }
+
+    @Test
+    @WithoutJenkins
+    public void iconSizeRegex() {
         Matcher matcher = UserAvatarResolver.iconSizeRegex.matcher("12x15");
         assertTrue(matcher.matches());
         assertEquals("12", matcher.group(1));
         assertEquals("15", matcher.group(2));
     }
-    
+
     @Extension
     public static final class UserAvatarResolverImpl extends UserAvatarResolver {
-
         @Override
         public String findAvatarFor(User u, int width, int height) {
-            if ((u != null) && (u == expUser)) {
+            if (u != null && u == expUser) {
                 return "http://myown.image";
             }
             return null;
-        }   
+        }
     }
 }

@@ -25,14 +25,13 @@ package hudson.markup;
 
 import hudson.Extension;
 import hudson.Util;
-import hudson.markup.MarkupFormatter;
-import hudson.markup.MarkupFormatterDescriptor;
 import java.io.IOException;
 import java.io.Writer;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
- * @link MarkupFormatter} that treats the input as the escaped html.
+ * {@link MarkupFormatter} that treats the input as the escaped html.
  *
  * @author Seiji Sogabe
  * @since 1.553
@@ -45,10 +44,12 @@ public class EscapedMarkupFormatter extends MarkupFormatter {
 
     @Override
     public void translate(String markup, Writer output) throws IOException {
-        output.write(Util.escape(markup));
+        if (markup != null) {
+            output.write(Util.escape(markup));
+        }
     }
 
-    @Extension
+    @Extension @Symbol("plainText")
     public static class DescriptorImpl extends MarkupFormatterDescriptor {
 
         @Override

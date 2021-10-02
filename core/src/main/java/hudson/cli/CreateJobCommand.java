@@ -23,9 +23,9 @@
  */
 package hudson.cli;
 
-import jenkins.model.Jenkins;
 import hudson.Extension;
 import hudson.model.Item;
+import jenkins.model.Jenkins;
 import jenkins.model.ModifiableTopLevelItemGroup;
 import org.kohsuke.args4j.Argument;
 
@@ -44,12 +44,12 @@ public class CreateJobCommand extends CLICommand {
     @Argument(metaVar="NAME",usage="Name of the job to create",required=true)
     public String name;
 
+    @Override
     protected int run() throws Exception {
-        Jenkins h = Jenkins.getInstance();
+        Jenkins h = Jenkins.get();
 
         if (h.getItemByFullName(name)!=null) {
-            stderr.println("Job '"+name+"' already exists");
-            return -1;
+            throw new IllegalStateException("Job '"+name+"' already exists");
         }
 
         ModifiableTopLevelItemGroup ig = h;
@@ -64,7 +64,7 @@ public class CreateJobCommand extends CLICommand {
             if (item instanceof ModifiableTopLevelItemGroup) {
                 ig = (ModifiableTopLevelItemGroup) item;
             } else {
-                throw new IllegalArgumentException("Can't create job from CLI in " + group);
+                throw new IllegalStateException("Can't create job from CLI in " + group);
             }
             name = name.substring(i + 1);
         }
@@ -74,5 +74,3 @@ public class CreateJobCommand extends CLICommand {
         return 0;
     }
 }
-
-

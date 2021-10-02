@@ -23,9 +23,6 @@
  */
 package hudson;
 
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import com.google.inject.AbstractModule;
 import com.google.inject.Binding;
 import com.google.inject.Guice;
@@ -35,11 +32,30 @@ import com.google.inject.Module;
 import com.google.inject.Provider;
 import com.google.inject.Scope;
 import com.google.inject.Scopes;
+import com.google.inject.matcher.Matchers;
 import com.google.inject.name.Names;
-import com.google.common.collect.ImmutableList;
+import com.google.inject.spi.ProvisionListener;
 import hudson.init.InitMilestone;
 import hudson.model.Descriptor;
 import hudson.model.Hudson;
+import java.lang.annotation.Annotation;
+import java.lang.reflect.AnnotatedElement;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
+import javax.annotation.PostConstruct;
 import jenkins.ExtensionComponentSet;
 import jenkins.ExtensionFilter;
 import jenkins.ExtensionRefreshException;
@@ -49,20 +65,7 @@ import net.java.sezpoz.Index;
 import net.java.sezpoz.IndexItem;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-
-import java.lang.annotation.Annotation;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.logging.Logger;
-import java.util.logging.Level;
-import java.util.List;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.lang.reflect.AnnotatedElement;
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
+import org.springframework.util.ClassUtils;
 
 /**
  * Discovers the implementations of an extension point.
@@ -85,6 +88,7 @@ public abstract class ExtensionFinder implements ExtensionPoint {
      *      Use and implement {@link #find(Class,Hudson)} that allows us to put some metadata.
      */
     @Restricted(NoExternalUse.class)
+    @Deprecated
     public <T> Collection<T> findExtensions(Class<T> type, Hudson hudson) {
         return Collections.emptyList();
     }
@@ -143,10 +147,7 @@ public abstract class ExtensionFinder implements ExtensionPoint {
      */
     public abstract <T> Collection<ExtensionComponent<T>> find(Class<T> type, Hudson jenkins);
 
-    /**
-     * A pointless function to work around what appears to be a HotSpot problem. See JENKINS-5756 and bug 6933067
-     * on BugParade for more details.
-     */
+    @Deprecated
     public <T> Collection<ExtensionComponent<T>> _find(Class<T> type, Hudson hudson) {
         return find(type, hudson);
     }
@@ -177,7 +178,7 @@ public abstract class ExtensionFinder implements ExtensionPoint {
      * from here.
      *
      * <p>
-     * See http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6459208 for how to force a class initialization.
+     * See https://bugs.openjdk.java.net/browse/JDK-4993813 for how to force a class initialization.
      * Also see http://kohsuke.org/2010/09/01/deadlock-that-you-cant-avoid/ for how class initialization
      * can results in a dead lock.
      */
@@ -210,7 +211,7 @@ public abstract class ExtensionFinder implements ExtensionPoint {
     /**
      * Captures information about the annotation that we use to mark Guice-instantiated components.
      */
-    public static abstract class GuiceExtensionAnnotation<T extends Annotation> {
+    public abstract static class GuiceExtensionAnnotation<T extends Annotation> {
         public final Class<T> annotationType;
 
         protected GuiceExtensionAnnotation(Class<T> annotationType) {
@@ -247,32 +248,29 @@ public abstract class ExtensionFinder implements ExtensionPoint {
          */
         private List<IndexItem<?,Object>> sezpozIndex;
 
-        private final Map<Key,Annotation> annotations = new HashMap<Key,Annotation>();
+        private final Map<Key,Annotation> annotations = new HashMap<>();
         private final Sezpoz moduleFinder = new Sezpoz();
 
         /**
          * Map from {@link GuiceExtensionAnnotation#annotationType} to {@link GuiceExtensionAnnotation}
          */
-        private Map<Class<? extends Annotation>,GuiceExtensionAnnotation<?>> extensionAnnotations = Maps.newHashMap();
+        private Map<Class<? extends Annotation>,GuiceExtensionAnnotation<?>> extensionAnnotations = new HashMap<>();
 
         public GuiceFinder() {
-            for (ExtensionComponent<GuiceExtensionAnnotation> ec : moduleFinder.find(GuiceExtensionAnnotation.class, Hudson.getInstance())) {
-                GuiceExtensionAnnotation gea = ec.getInstance();
-                extensionAnnotations.put(gea.annotationType,gea);
-            }
+            refreshExtensionAnnotations();
 
-            sezpozIndex = loadSezpozIndices(Jenkins.getInstance().getPluginManager().uberClassLoader);
+            SezpozModule extensions = new SezpozModule(loadSezpozIndices(Jenkins.get().getPluginManager().uberClassLoader));
 
-            List<Module> modules = new ArrayList<Module>();
+            List<Module> modules = new ArrayList<>();
             modules.add(new AbstractModule() {
                 @Override
                 protected void configure() {
-                    Jenkins j = Jenkins.getInstance();
+                    Jenkins j = Jenkins.get();
                     bind(Jenkins.class).toInstance(j);
                     bind(PluginManager.class).toInstance(j.getPluginManager());
                 }
             });
-            modules.add(new SezpozModule(sezpozIndex));
+            modules.add(extensions);
 
             for (ExtensionComponent<Module> ec : moduleFinder.find(Module.class, Hudson.getInstance())) {
                 modules.add(ec.getInstance());
@@ -280,6 +278,7 @@ public abstract class ExtensionFinder implements ExtensionPoint {
 
             try {
                 container = Guice.createInjector(modules);
+                sezpozIndex = extensions.getLoadedIndex();
             } catch (Throwable e) {
                 LOGGER.log(Level.SEVERE, "Failed to create Guice container from all the plugins",e);
                 // failing to load all bindings are disastrous, so recover by creating minimum that works
@@ -288,19 +287,29 @@ public abstract class ExtensionFinder implements ExtensionPoint {
             }
 
             // expose Injector via lookup mechanism for interop with non-Guice clients
-            Jenkins.getInstance().lookup.set(Injector.class,new ProxyInjector() {
+            Jenkins.get().lookup.set(Injector.class,new ProxyInjector() {
+                @Override
                 protected Injector resolve() {
                     return getContainer();
                 }
             });
         }
 
-        private ImmutableList<IndexItem<?, Object>> loadSezpozIndices(ClassLoader classLoader) {
-            List<IndexItem<?,Object>> indices = Lists.newArrayList();
-            for (GuiceExtensionAnnotation<?> gea : extensionAnnotations.values()) {
-                Iterables.addAll(indices, Index.load(gea.annotationType, Object.class, classLoader));
+        private void refreshExtensionAnnotations() {
+            for (ExtensionComponent<GuiceExtensionAnnotation> ec : moduleFinder.find(GuiceExtensionAnnotation.class, Hudson.getInstance())) {
+                GuiceExtensionAnnotation gea = ec.getInstance();
+                extensionAnnotations.put(gea.annotationType,gea);
             }
-            return ImmutableList.copyOf(indices);
+        }
+
+        private List<IndexItem<?, Object>> loadSezpozIndices(ClassLoader classLoader) {
+            List<IndexItem<?,Object>> indices = new ArrayList<>();
+            for (GuiceExtensionAnnotation<?> gea : extensionAnnotations.values()) {
+                for (IndexItem<?, Object> indexItem : Index.load(gea.annotationType, Object.class, classLoader)) {
+                    indices.add(indexItem);
+                }
+            }
+            return Collections.unmodifiableList(indices);
         }
 
         public Injector getContainer() {
@@ -317,17 +326,17 @@ public abstract class ExtensionFinder implements ExtensionPoint {
          */
         @Override
         public synchronized ExtensionComponentSet refresh() throws ExtensionRefreshException {
+            refreshExtensionAnnotations();
             // figure out newly discovered sezpoz components
-            List<IndexItem<?, Object>> delta = Lists.newArrayList();
+            List<IndexItem<?, Object>> delta = new ArrayList<>();
             for (Class<? extends Annotation> annotationType : extensionAnnotations.keySet()) {
                 delta.addAll(Sezpoz.listDelta(annotationType,sezpozIndex));
             }
-            List<IndexItem<?, Object>> l = Lists.newArrayList(sezpozIndex);
-            l.addAll(delta);
-            sezpozIndex = l;
 
-            List<Module> modules = new ArrayList<Module>();
-            modules.add(new SezpozModule(delta));
+            SezpozModule deltaExtensions = new SezpozModule(delta);
+
+            List<Module> modules = new ArrayList<>();
+            modules.add(deltaExtensions);
             for (ExtensionComponent<Module> ec : moduleFinder.refresh().find(Module.class)) {
                 modules.add(ec.getInstance());
             }
@@ -335,11 +344,14 @@ public abstract class ExtensionFinder implements ExtensionPoint {
             try {
                 final Injector child = container.createChildInjector(modules);
                 container = child;
+                List<IndexItem<?, Object>> l = new ArrayList<>(sezpozIndex);
+                l.addAll(deltaExtensions.getLoadedIndex());
+                sezpozIndex = l;
 
                 return new ExtensionComponentSet() {
                     @Override
                     public <T> Collection<ExtensionComponent<T>> find(Class<T> type) {
-                        List<ExtensionComponent<T>> result = new ArrayList<ExtensionComponent<T>>();
+                        List<ExtensionComponent<T>> result = new ArrayList<>();
                         _find(type, result, child);
                         return result;
                     }
@@ -353,12 +365,9 @@ public abstract class ExtensionFinder implements ExtensionPoint {
         private Object instantiate(IndexItem<?,Object> item) {
             try {
                 return item.instance();
-            } catch (LinkageError e) {
+            } catch (LinkageError | Exception e) {
                 // sometimes the instantiation fails in an indirect classloading failure,
                 // which results in a LinkageError
-                LOGGER.log(isOptional(item.annotation()) ? Level.FINE : Level.WARNING,
-                           "Failed to load "+item.className(), e);
-            } catch (InstantiationException e) {
                 LOGGER.log(isOptional(item.annotation()) ? Level.FINE : Level.WARNING,
                            "Failed to load "+item.className(), e);
             }
@@ -375,9 +384,10 @@ public abstract class ExtensionFinder implements ExtensionPoint {
             return gea.isActive(e);
         }
 
+        @Override
         public <U> Collection<ExtensionComponent<U>> find(Class<U> type, Hudson jenkins) {
             // the find method contract requires us to traverse all known components
-            List<ExtensionComponent<U>> result = new ArrayList<ExtensionComponent<U>>();
+            List<ExtensionComponent<U>> result = new ArrayList<>();
             for (Injector i=container; i!=null; i=i.getParent()) {
                 _find(type, result, i);
             }
@@ -385,13 +395,13 @@ public abstract class ExtensionFinder implements ExtensionPoint {
         }
 
         private <U> void _find(Class<U> type, List<ExtensionComponent<U>> result, Injector container) {
-            for (Entry<Key<?>, Binding<?>> e : container.getBindings().entrySet()) {
+            for (Map.Entry<Key<?>, Binding<?>> e : container.getBindings().entrySet()) {
                 if (type.isAssignableFrom(e.getKey().getTypeLiteral().getRawType())) {
                     Annotation a = annotations.get(e.getKey());
                     Object o = e.getValue().getProvider().get();
                     if (o!=null) {
                         GuiceExtensionAnnotation gea = a!=null ? extensionAnnotations.get(a.annotationType()) : null;
-                        result.add(new ExtensionComponent<U>(type.cast(o),gea!=null?gea.getOrdinal(a):0));
+                        result.add(new ExtensionComponent<>(type.cast(o), gea != null ? gea.getOrdinal(a) : 0));
                     }
                 }
             }
@@ -421,31 +431,25 @@ public abstract class ExtensionFinder implements ExtensionPoint {
             FaultTolerantScope(boolean verbose) {
                 this.verbose = verbose;
             }
+            @Override
             public <T> Provider<T> scope(final Key<T> key, final Provider<T> unscoped) {
                 final Provider<T> base = Scopes.SINGLETON.scope(key,unscoped);
                 return new Provider<T>() {
+                    @Override
                     public T get() {
                         try {
                             return base.get();
-                        } catch (Exception e) {
-                            error(key, e);
-                            return null;
-                        } catch (LinkageError e) {
+                        } catch (Exception | LinkageError e) {
                             error(key, e);
                             return null;
                         }
                     }
                     void error(Key<T> key, Throwable x) {
-                        if (verbose) {
-                            LOGGER.log(Level.WARNING, "Failed to instantiate " + key + "; skipping this component", x);
-                        } else {
-                            LOGGER.log(Level.WARNING, "Failed to instantiate optional component {0}; skipping", key.getTypeLiteral());
-                            LOGGER.log(Level.FINE, key.toString(), x);
-                        }
+                        LOGGER.log(verbose ? Level.WARNING : Level.FINE, "Failed to instantiate " + key + "; skipping this component", x);
                     }
                 };
             }
-        };
+        }
 
         private static final Logger LOGGER = Logger.getLogger(GuiceFinder.class.getName());
 
@@ -454,11 +458,13 @@ public abstract class ExtensionFinder implements ExtensionPoint {
          * Instead of using SezPoz to instantiate, we'll instantiate them by using Guice,
          * so that we can take advantage of dependency injection.
          */
-        private class SezpozModule extends AbstractModule {
+        private class SezpozModule extends AbstractModule implements ProvisionListener {
             private final List<IndexItem<?,Object>> index;
+            private final List<IndexItem<?,Object>> loadedIndex;
 
-            public SezpozModule(List<IndexItem<?,Object>> index) {
+            SezpozModule(List<IndexItem<?,Object>> index) {
                 this.index = index;
+                this.loadedIndex = new ArrayList<>();
             }
 
             /**
@@ -473,32 +479,41 @@ public abstract class ExtensionFinder implements ExtensionPoint {
              * So this is an attempt to detect subset of problems eagerly, by invoking various reflection
              * operations and try to find non-existent classes early.
              */
-            private void resolve(Class c) {
+            private void resolve(Class<?> c) {
+                resolve(c, new HashSet<>());
+            }
+            private void resolve(Class<?> c, Set<Class<?>> encountered) {
+                if (!encountered.add(c)) {
+                    return;
+                }
                 try {
-                    c.getGenericSuperclass();
-                    c.getGenericInterfaces();
-                    ClassLoader ecl = c.getClassLoader();
-                    Method m = ClassLoader.class.getDeclaredMethod("resolveClass", Class.class);
-                    m.setAccessible(true);
-                    m.invoke(ecl, c);
-                    c.getMethods();
-                    c.getFields();       
-                    while (c != Object.class) {
-                        c.getGenericSuperclass();
-                        c = c.getSuperclass();
+                    for (Class<?> cc = c; cc != Object.class && cc != null; cc = cc.getSuperclass()) {
+                        /*
+                         * See {@link com.google.inject.spi.InjectionPoint#getInjectionPoints(TypeLiteral, boolean, Errors)}
+                         */
+                        cc.getGenericSuperclass();
+                        cc.getGenericInterfaces();
+                        cc.getDeclaredConstructors();
+                        cc.getDeclaredMethods();
+                        for (Field f : cc.getDeclaredFields()) {
+                            if (f.getAnnotation(javax.inject.Inject.class) != null || f.getAnnotation(com.google.inject.Inject.class) != null) {
+                                resolve(f.getType(), encountered);
+                            }
+                        }
                     }
+                    LOGGER.log(Level.FINER, "{0} looks OK", c);
                 } catch (Exception x) {
-                    throw (LinkageError)new LinkageError("Failed to resolve "+c).initCause(x);
+                    throw new LinkageError("Failed to resolve "+c, x);
                 }
             }
 
             @SuppressWarnings({"unchecked", "ChainOfInstanceofChecks"})
             @Override
             protected void configure() {
-                int id=0;
+
+                bindListener(Matchers.any(), this);
 
                 for (final IndexItem<?,Object> item : index) {
-                    id++;
                     boolean optional = isOptional(item.annotation());
                     try {
                         AnnotatedElement e = item.element();
@@ -518,33 +533,87 @@ public abstract class ExtensionFinder implements ExtensionPoint {
                             } else
                             if (e instanceof Method) {
                                 extType = ((Method)e).getReturnType();
-                            } else
+                            } else {
                                 throw new AssertionError();
+                            }
 
                             resolve(extType);
 
-                            // use arbitrary id to make unique key, because Guice wants that.
-                            Key key = Key.get(extType, Names.named(String.valueOf(id)));
+                            // make unique key, because Guice wants that.
+                            Key key = Key.get(extType, Names.named(item.className() + "." + item.memberName()));
                             annotations.put(key,a);
-                            bind(key).toProvider(new Provider() {
-                                    public Object get() {
-                                        return instantiate(item);
-                                    }
-                                }).in(scope);
+                            bind(key).toProvider(() -> instantiate(item)).in(scope);
                         }
-                    } catch (LinkageError e) {
+                        loadedIndex.add(item);
+                    } catch (Exception|LinkageError e) {
                         // sometimes the instantiation fails in an indirect classloading failure,
                         // which results in a LinkageError
-                        LOGGER.log(optional ? Level.FINE : Level.WARNING,
-                                   "Failed to load "+item.className(), e);
-                    } catch (InstantiationException e) {
                         LOGGER.log(optional ? Level.FINE : Level.WARNING,
                                    "Failed to load "+item.className(), e);
                     }
                 }
             }
+
+            public List<IndexItem<?, Object>> getLoadedIndex() {
+                return Collections.unmodifiableList(new ArrayList<>(loadedIndex));
+            }
+
+            @Override
+            public <T> void onProvision(ProvisionInvocation<T> provision) {
+                final T instance = provision.provision();
+                if (instance == null) return;
+                List<Method> methods = new ArrayList<>();
+                Class c = instance.getClass();
+
+                // find PostConstruct methods in class hierarchy, the one from parent class being first in list
+                // so that we invoke them before derived class one. This isn't specified in JSR-250 but implemented
+                // this way in Spring and what most developers would expect to happen.
+
+                final Set<Class<?>> interfaces = ClassUtils.getAllInterfacesAsSet(instance);
+
+                while (c != Object.class) {
+                    Arrays.stream(c.getDeclaredMethods())
+                            .map(m -> getMethodAndInterfaceDeclarations(m, interfaces))
+                            .flatMap(Collection::stream)
+                            .filter(m -> m.getAnnotation(PostConstruct.class) != null)
+                            .findFirst()
+                            .ifPresent(method -> methods.add(0, method));
+                    c = c.getSuperclass();
+                }
+
+                for (Method postConstruct : methods) {
+                    try {
+                        postConstruct.setAccessible(true);
+                        postConstruct.invoke(instance);
+                    } catch (final Exception e) {
+                        throw new RuntimeException(String.format("@PostConstruct %s", postConstruct), e);
+                    }
+                }
+            }
         }
     }
+
+    /**
+     * Returns initial {@link Method} as well as all matching ones found in interfaces.
+     * This allows to introspect metadata for a method which is both declared in parent class and in implemented
+     * interface(s). {@code interfaces} typically is obtained by {@link ClassUtils#getAllInterfacesAsSet}
+     */
+    Collection<Method> getMethodAndInterfaceDeclarations(Method method, Collection<Class<?>> interfaces) {
+        final List<Method> methods = new ArrayList<>();
+        methods.add(method);
+
+        // we search for matching method by iteration and comparison vs getMethod to avoid repeated NoSuchMethodException
+        // being thrown, while interface typically only define a few set of methods to check.
+        interfaces.stream()
+                .map(Class::getMethods)
+                .flatMap(Arrays::stream)
+                .filter(m -> m.getName().equals(method.getName()) && Arrays.equals(m.getParameterTypes(), method.getParameterTypes()))
+                .findFirst()
+                .ifPresent(methods::add);
+
+        return methods;
+    }
+
 
     /**
      * The bootstrap implementation that looks for the {@link Extension} marker.
@@ -570,8 +639,8 @@ public abstract class ExtensionFinder implements ExtensionPoint {
             // 4. thread Y decides to load extensions, now blocked on SZ.
             // 5. dead lock
             if (indices==null) {
-                ClassLoader cl = Jenkins.getInstance().getPluginManager().uberClassLoader;
-                indices = ImmutableList.copyOf(Index.load(Extension.class, Object.class, cl));
+                ClassLoader cl = Jenkins.get().getPluginManager().uberClassLoader;
+                indices = Collections.unmodifiableList(StreamSupport.stream(Index.load(Extension.class, Object.class, cl).spliterator(), false).collect(Collectors.toList()));
             }
             return indices;
         }
@@ -589,9 +658,9 @@ public abstract class ExtensionFinder implements ExtensionPoint {
 
             final List<IndexItem<Extension, Object>> delta = listDelta(Extension.class,old);
 
-            List<IndexItem<Extension,Object>> r = Lists.newArrayList(old);
+            List<IndexItem<Extension,Object>> r = new ArrayList<>(old);
             r.addAll(delta);
-            indices = ImmutableList.copyOf(r);
+            indices = Collections.unmodifiableList(r);
 
             return new ExtensionComponentSet() {
                 @Override
@@ -603,8 +672,8 @@ public abstract class ExtensionFinder implements ExtensionPoint {
 
         static <T extends Annotation> List<IndexItem<T,Object>> listDelta(Class<T> annotationType, List<? extends IndexItem<?,Object>> old) {
             // list up newly discovered components
-            final List<IndexItem<T,Object>> delta = Lists.newArrayList();
-            ClassLoader cl = Jenkins.getInstance().getPluginManager().uberClassLoader;
+            final List<IndexItem<T,Object>> delta = new ArrayList<>();
+            ClassLoader cl = Jenkins.get().getPluginManager().uberClassLoader;
             for (IndexItem<T,Object> ii : Index.load(annotationType, Object.class, cl)) {
                 if (!old.contains(ii)) {
                     delta.add(ii);
@@ -613,6 +682,7 @@ public abstract class ExtensionFinder implements ExtensionPoint {
             return delta;
         }
 
+        @Override
         public <T> Collection<ExtensionComponent<T>> find(Class<T> type, Hudson jenkins) {
             return _find(type,getIndices());
         }
@@ -621,33 +691,20 @@ public abstract class ExtensionFinder implements ExtensionPoint {
          * Finds all the matching {@link IndexItem}s that match the given type and instantiate them.
          */
         private <T> Collection<ExtensionComponent<T>> _find(Class<T> type, List<IndexItem<Extension,Object>> indices) {
-            List<ExtensionComponent<T>> result = new ArrayList<ExtensionComponent<T>>();
+            List<ExtensionComponent<T>> result = new ArrayList<>();
 
             for (IndexItem<Extension,Object> item : indices) {
                 try {
-                    AnnotatedElement e = item.element();
-                    Class<?> extType;
-                    if (e instanceof Class) {
-                        extType = (Class) e;
-                    } else
-                    if (e instanceof Field) {
-                        extType = ((Field)e).getType();
-                    } else
-                    if (e instanceof Method) {
-                        extType = ((Method)e).getReturnType();
-                    } else
-                        throw new AssertionError();
+                    Class<?> extType = getClassFromIndex(item);
 
                     if(type.isAssignableFrom(extType)) {
                         Object instance = item.instance();
                         if(instance!=null)
-                            result.add(new ExtensionComponent<T>(type.cast(instance),item.annotation()));
+                            result.add(new ExtensionComponent<>(type.cast(instance),item.annotation()));
                     }
-                } catch (LinkageError e) {
+                } catch (LinkageError|Exception e) {
                     // sometimes the instantiation fails in an indirect classloading failure,
                     // which results in a LinkageError
-                    LOGGER.log(logLevel(item), "Failed to load "+item.className(), e);
-                } catch (InstantiationException e) {
                     LOGGER.log(logLevel(item), "Failed to load "+item.className(), e);
                 }
             }
@@ -663,26 +720,10 @@ public abstract class ExtensionFinder implements ExtensionPoint {
                     // but we can't synchronize this --- if we do, the one thread that's supposed to load a class
                     // can block while other threads wait for the entry into the element call().
                     // looking at the sezpoz code, it should be safe to do so
-                    AnnotatedElement e = item.element();
-                    Class<?> extType;
-                    if (e instanceof Class) {
-                        extType = (Class) e;
-                    } else
-                    if (e instanceof Field) {
-                        extType = ((Field)e).getType();
-                    } else
-                    if (e instanceof Method) {
-                        extType = ((Method)e).getReturnType();
-                    } else
-                        throw new AssertionError();
-                    // according to http://bugs.sun.com/bugdatabase/view_bug.do?bug_id=6459208
-                    // this appears to be the only way to force a class initialization
+                    Class<?> extType = getClassFromIndex(item);
+                    // according to JDK-4993813 this is the only way to force class initialization
                     Class.forName(extType.getName(),true,extType.getClassLoader());
-                } catch (InstantiationException e) {
-                    LOGGER.log(logLevel(item), "Failed to scout "+item.className(), e);
-                } catch (ClassNotFoundException e) {
-                    LOGGER.log(logLevel(item), "Failed to scout "+item.className(), e);
-                } catch (LinkageError e) {
+                } catch (Exception | LinkageError e) {
                     LOGGER.log(logLevel(item), "Failed to scout "+item.className(), e);
                 }
             }
@@ -691,6 +732,21 @@ public abstract class ExtensionFinder implements ExtensionPoint {
         private Level logLevel(IndexItem<Extension, Object> item) {
             return item.annotation().optional() ? Level.FINE : Level.WARNING;
         }
+    }
+
+    private static Class<?> getClassFromIndex(IndexItem<Extension, Object> item) throws InstantiationException {
+        AnnotatedElement e = item.element();
+        Class<?> extType;
+        if (e instanceof Class) {
+            extType = (Class) e;
+        } else if (e instanceof Field) {
+            extType = ((Field) e).getType();
+        } else if (e instanceof Method) {
+            extType = ((Method) e).getReturnType();
+        } else {
+            throw new AssertionError();
+        }
+        return extType;
     }
 
     private static final Logger LOGGER = Logger.getLogger(ExtensionFinder.class.getName());

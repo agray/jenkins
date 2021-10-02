@@ -31,21 +31,24 @@ import com.thoughtworks.xstream.io.HierarchicalStreamReader;
 import com.thoughtworks.xstream.io.HierarchicalStreamWriter;
 import com.thoughtworks.xstream.mapper.Mapper;
 import hudson.model.AbstractProject;
-import jenkins.model.DependencyDeclarer;
 import hudson.model.DependencyGraph;
 import hudson.model.Describable;
 import hudson.model.Descriptor;
 import hudson.model.Descriptor.FormException;
 import hudson.model.ReconfigurableDescribable;
 import hudson.model.Saveable;
-import net.sf.json.JSONObject;
-import org.kohsuke.stapler.StaplerRequest;
-
 import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import jenkins.model.DependencyDeclarer;
+import net.sf.json.JSONObject;
+import org.kohsuke.stapler.StaplerRequest;
 
 /**
  * Persisted list of {@link Describable}s with some operations specific
@@ -69,6 +72,7 @@ public class DescribableList<T extends Describable<T>, D extends Descriptor<T>> 
      * @deprecated since 2008-08-15.
      *      Use {@link #DescribableList(Saveable)} 
      */
+    @Deprecated
     public DescribableList(Owner owner) {
         setOwner(owner);
     }
@@ -86,6 +90,7 @@ public class DescribableList<T extends Describable<T>, D extends Descriptor<T>> 
      * @deprecated since 2008-08-15.
      *      Use {@link #setOwner(Saveable)}
      */
+    @Deprecated
     public void setOwner(Owner owner) {
         this.owner = owner;
     }
@@ -158,7 +163,7 @@ public class DescribableList<T extends Describable<T>, D extends Descriptor<T>> 
      *      Structured form data that includes the data for nested descriptor list.
      */
     public void rebuild(StaplerRequest req, JSONObject json, List<? extends Descriptor<T>> descriptors) throws FormException, IOException {
-        List<T> newList = new ArrayList<T>();
+        List<T> newList = new ArrayList<>();
 
         for (Descriptor<T> d : descriptors) {
             T existing = get((D)d);
@@ -187,6 +192,7 @@ public class DescribableList<T extends Describable<T>, D extends Descriptor<T>> 
      * @deprecated as of 1.271
      *      Use {@link #rebuild(StaplerRequest, JSONObject, List)} instead.
      */
+    @Deprecated
     public void rebuild(StaplerRequest req, JSONObject json, List<? extends Descriptor<T>> descriptors, String prefix) throws FormException, IOException {
         rebuild(req,json,descriptors);
     }
@@ -195,7 +201,7 @@ public class DescribableList<T extends Describable<T>, D extends Descriptor<T>> 
      * Rebuilds the list by creating a fresh instances from the submitted form.
      *
      * <p>
-     * This version works with the the &lt;f:hetero-list> UI tag, where the user
+     * This version works with the {@code <f:hetero-list>} UI tag, where the user
      * is allowed to create multiple instances of the same descriptor. Order is also
      * significant.
      */
@@ -210,7 +216,11 @@ public class DescribableList<T extends Describable<T>, D extends Descriptor<T>> 
         for (Object o : this) {
             if (o instanceof DependencyDeclarer) {
                 DependencyDeclarer dd = (DependencyDeclarer) o;
-                dd.buildDependencyGraph(owner,graph);
+                try {
+                    dd.buildDependencyGraph(owner,graph);
+                } catch (RuntimeException e) {
+                    LOGGER.log(Level.SEVERE, "Failed to build dependency graph for " + owner,e);
+                }
             }
         }
     }
@@ -221,6 +231,7 @@ public class DescribableList<T extends Describable<T>, D extends Descriptor<T>> 
     get(Ljava/lang/Class;)Ljava/lang/Object; from PersistedList where we need
     get(Ljava/lang/Class;)Lhudson/model/Describable;
  */
+    @Override
     public <U extends T> U get(Class<U> type) {
         return super.get(type);
     }
@@ -233,13 +244,14 @@ public class DescribableList<T extends Describable<T>, D extends Descriptor<T>> 
      * @deprecated since 2008-08-15.
      *      Just implement {@link Saveable}.
      */
+    @Deprecated
     public interface Owner extends Saveable {
     }
 
     /**
      * {@link Converter} implementation for XStream.
      *
-     * Serializaion form is compatible with plain {@link List}.
+     * Serialization form is compatible with plain {@link List}.
      */
     public static class ConverterImpl extends AbstractCollectionConverter {
         CopyOnWriteList.ConverterImpl copyOnWriteListConverter;
@@ -249,23 +261,29 @@ public class DescribableList<T extends Describable<T>, D extends Descriptor<T>> 
             copyOnWriteListConverter = new CopyOnWriteList.ConverterImpl(mapper());
         }
 
+        @Override
         public boolean canConvert(Class type) {
             // handle subtypes in case the onModified method is overridden.
             return DescribableList.class.isAssignableFrom(type);
         }
 
+        @Override
         public void marshal(Object source, HierarchicalStreamWriter writer, MarshallingContext context) {
             for (Object o : (DescribableList) source)
                 writeItem(o, context, writer);
         }
 
+        @Override
         public Object unmarshal(HierarchicalStreamReader reader, UnmarshallingContext context) {
-            CopyOnWriteList core = copyOnWriteListConverter.unmarshal(reader, context);
-
             try {
-                DescribableList r = (DescribableList)context.getRequiredType().newInstance();
+                DescribableList r = (DescribableList) context.getRequiredType().asSubclass(DescribableList.class).getDeclaredConstructor().newInstance();
+                CopyOnWriteList core = copyOnWriteListConverter.unmarshal(reader, context);
                 r.data.replaceBy(core);
                 return r;
+            } catch (NoSuchMethodException e) {
+                NoSuchMethodError x = new NoSuchMethodError();
+                x.initCause(e);
+                throw x;
             } catch (InstantiationException e) {
                 InstantiationError x = new InstantiationError();
                 x.initCause(e);
@@ -274,7 +292,22 @@ public class DescribableList<T extends Describable<T>, D extends Descriptor<T>> 
                 IllegalAccessError x = new IllegalAccessError();
                 x.initCause(e);
                 throw x;
+            } catch (InvocationTargetException e) {
+                Throwable t = e.getCause();
+                if (t instanceof RuntimeException) {
+                    throw (RuntimeException) t;
+                } else if (t instanceof IOException) {
+                    throw new UncheckedIOException((IOException) t);
+                } else if (t instanceof Exception) {
+                    throw new RuntimeException(t);
+                } else if (t instanceof Error) {
+                    throw (Error) t;
+                } else {
+                    throw new Error(e);
+                }
             }
         }
     }
+
+    private static final Logger LOGGER = Logger.getLogger(DescribableList.class.getName());
 }

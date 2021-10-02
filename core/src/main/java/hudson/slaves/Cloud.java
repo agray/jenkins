@@ -23,49 +23,51 @@
  */
 package hudson.slaves;
 
-import hudson.ExtensionPoint;
-import hudson.Extension;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.DescriptorExtensionList;
+import hudson.Extension;
+import hudson.ExtensionPoint;
+import hudson.Util;
+import hudson.model.Actionable;
 import hudson.model.Computer;
-import hudson.model.Slave;
-import hudson.slaves.NodeProvisioner.PlannedNode;
 import hudson.model.Describable;
-import jenkins.model.Jenkins;
-import hudson.model.Node;
-import hudson.model.AbstractModelObject;
-import hudson.model.Label;
 import hudson.model.Descriptor;
+import hudson.model.Label;
+import hudson.model.Node;
+import hudson.model.Slave;
 import hudson.security.ACL;
 import hudson.security.AccessControlled;
 import hudson.security.Permission;
+import hudson.security.PermissionScope;
+import hudson.slaves.NodeProvisioner.PlannedNode;
 import hudson.util.DescriptorList;
+import java.util.Collection;
+import java.util.concurrent.Future;
+import jenkins.model.Jenkins;
 import org.kohsuke.stapler.DataBoundConstructor;
 
-import java.util.Collection;
-
 /**
- * Creates {@link Node}s to dynamically expand/shrink the slaves attached to Hudson.
+ * Creates {@link Node}s to dynamically expand/shrink the agents attached to Hudson.
  *
  * <p>
  * Put another way, this class encapsulates different communication protocols
- * needed to start a new slave programmatically.
+ * needed to start a new agent programmatically.
  *
  * <h2>Notes for implementers</h2>
- * <h4>Automatically delete idle slaves</h4>
- * <p>
+ * <h3>Automatically delete idle agents</h3>
  * Nodes provisioned from a cloud do not automatically get released just because it's created from {@link Cloud}.
  * Doing so requires a use of {@link RetentionStrategy}. Instantiate your {@link Slave} subtype with something
  * like {@link CloudSlaveRetentionStrategy} so that it gets automatically deleted after some idle time.
  *
- * <h4>Freeing an external resource when a slave is removed</h4>
- * <p>
+ * <h3>Freeing an external resource when an agent is removed</h3>
  * Whether you do auto scale-down or not, you often want to release an external resource tied to a cloud-allocated
- * slave when it is removed.
+ * agent when it is removed.
  *
  * <p>
  * To do this, have your {@link Slave} subtype remember the necessary handle (such as EC2 instance ID)
  * as a field. Such fields need to survive the user-initiated re-configuration of {@link Slave}, so you'll need to
- * expose it in your {@link Slave} <tt>configure-entries.jelly</tt> and read it back in through {@link DataBoundConstructor}.
+ * expose it in your {@link Slave} {@code configure-entries.jelly} and read it back in through {@link DataBoundConstructor}.
  *
  * <p>
  * You then implement your own {@link Computer} subtype, override {@link Slave#createComputer()}, and instantiate
@@ -76,12 +78,18 @@ import java.util.Collection;
  * the resource (such as shutting down a virtual machine.) {@link Computer} needs to own this handle information
  * because by the time this happens, a {@link Slave} object is already long gone.
  *
+ * <h3>Views</h3>
+ *
+ * Since version 2.64, Jenkins clouds are visualized in UI. Implementations can provide {@code top} or {@code main} view
+ * to be presented at the top of the page or at the bottom respectively. In the middle, actions have their {@code summary}
+ * views displayed. Actions further contribute to {@code sidepanel} with {@code box} views. All mentioned views are
+ * optional to preserve backward compatibility.
  *
  * @author Kohsuke Kawaguchi
  * @see NodeProvisioner
  * @see AbstractCloudImpl
  */
-public abstract class Cloud extends AbstractModelObject implements ExtensionPoint, Describable<Cloud>, AccessControlled {
+public abstract class Cloud extends Actionable implements ExtensionPoint, Describable<Cloud>, AccessControlled {
 
     /**
      * Uniquely identifies this {@link Cloud} instance among other instances in {@link jenkins.model.Jenkins#clouds}.
@@ -95,24 +103,29 @@ public abstract class Cloud extends AbstractModelObject implements ExtensionPoin
         this.name = name;
     }
 
+    @Override
     public String getDisplayName() {
         return name;
     }
 
-    public String getSearchUrl() {
-        return "cloud/"+name;
+    /**
+     * Get URL of the cloud.
+     *
+     * @since 2.64
+     * @return Jenkins relative URL.
+     */
+    public @NonNull String getUrl() {
+        return "cloud/" + name;
     }
 
+    @Override
+    public @NonNull String getSearchUrl() {
+        return getUrl();
+    }
+
+    @Override
     public ACL getACL() {
-        return Jenkins.getInstance().getAuthorizationStrategy().getACL(this);
-    }
-
-    public final void checkPermission(Permission permission) {
-        getACL().checkPermission(permission);
-    }
-
-    public final boolean hasPermission(Permission permission) {
-        return getACL().hasPermission(permission);
+        return Jenkins.get().getAuthorizationStrategy().getACL(this);
     }
 
     /**
@@ -136,8 +149,46 @@ public abstract class Cloud extends AbstractModelObject implements ExtensionPoin
      *      for jobs that don't have any tie to any label.
      * @param excessWorkload
      *      Number of total executors needed to meet the current demand.
-     *      Always >= 1. For example, if this is 3, the implementation
-     *      should launch 3 slaves with 1 executor each, or 1 slave with
+     *      Always ≥ 1. For example, if this is 3, the implementation
+     *      should launch 3 agents with 1 executor each, or 1 agent with
+     *      3 executors, etc.
+     * @return
+     *      {@link PlannedNode}s that represent asynchronous {@link Node}
+     *      provisioning operations. Can be empty but must not be null.
+     *      {@link NodeProvisioner} will be responsible for adding the resulting {@link Node}s
+     *      into Hudson via {@link jenkins.model.Jenkins#addNode(Node)}, so a {@link Cloud} implementation
+     *      just needs to return {@link PlannedNode}s that each contain an object that implements {@link Future}.
+     *      When the {@link Future} has completed its work, {@link Future#get} will be called to obtain the
+     *      provisioned {@link Node} object.
+     * @deprecated Use {@link #provision(CloudState, int)} instead.
+     */
+    @Deprecated
+    public Collection<PlannedNode> provision(Label label, int excessWorkload) {
+        return Util.ifOverridden(() -> provision(new CloudState(label, 0), excessWorkload),
+                Cloud.class,
+                getClass(),
+                "provision",
+                CloudState.class,
+                int.class);
+    }
+
+    /**
+     * Provisions new {@link Node}s from this cloud.
+     *
+     * <p>
+     * {@link NodeProvisioner} performs a trend analysis on the load,
+     * and when it determines that it <b>really</b> needs to bring up
+     * additional nodes, this method is invoked.
+     *
+     * <p>
+     * The implementation of this method asynchronously starts
+     * node provisioning.
+     *
+     * @param state the current state.
+     * @param excessWorkload
+     *      Number of total executors needed to meet the current demand.
+     *      Always ≥ 1. For example, if this is 3, the implementation
+     *      should launch 3 agents with 1 executor each, or 1 agent with
      *      3 executors, etc.
      * @return
      *      {@link PlannedNode}s that represent asynchronous {@link Node}
@@ -148,15 +199,33 @@ public abstract class Cloud extends AbstractModelObject implements ExtensionPoin
      *      When the {@link Future} has completed its work, {@link Future#get} will be called to obtain the
      *      provisioned {@link Node} object.
      */
-    public abstract Collection<PlannedNode> provision(Label label, int excessWorkload);
+    public Collection<PlannedNode> provision(CloudState state, int excessWorkload) {
+        return provision(state.getLabel(), excessWorkload);
+    }
+
+    /**
+     * Returns true if this cloud is capable of provisioning new nodes for the given label.
+     * @deprecated Use {@link #canProvision(CloudState)} instead.
+     */
+    @Deprecated
+    public boolean canProvision(Label label) {
+        return Util.ifOverridden(() -> canProvision(new CloudState(label, 0)),
+                Cloud.class,
+                getClass(),
+                "canProvision",
+                CloudState.class);
+    }
 
     /**
      * Returns true if this cloud is capable of provisioning new nodes for the given label.
      */
-    public abstract boolean canProvision(Label label);
+    public boolean canProvision(CloudState state) {
+        return canProvision(state.getLabel());
+    }
 
+    @Override
     public Descriptor<Cloud> getDescriptor() {
-        return Jenkins.getInstance().getDescriptorOrDie(getClass());
+        return Jenkins.get().getDescriptorOrDie(getClass());
     }
 
     /**
@@ -165,19 +234,62 @@ public abstract class Cloud extends AbstractModelObject implements ExtensionPoin
      * @deprecated as of 1.286
      *      Use {@link #all()} for read access, and {@link Extension} for registration.
      */
-    public static final DescriptorList<Cloud> ALL = new DescriptorList<Cloud>(Cloud.class);
+    @Deprecated
+    public static final DescriptorList<Cloud> ALL = new DescriptorList<>(Cloud.class);
 
     /**
      * Returns all the registered {@link Cloud} descriptors.
      */
     public static DescriptorExtensionList<Cloud,Descriptor<Cloud>> all() {
-        return Jenkins.getInstance().<Cloud,Descriptor<Cloud>>getDescriptorList(Cloud.class);
+        return Jenkins.get().getDescriptorList(Cloud.class);
     }
+
+    private static final PermissionScope PERMISSION_SCOPE = new PermissionScope(Cloud.class);
 
     /**
      * Permission constant to control mutation operations on {@link Cloud}.
      *
      * This includes provisioning a new node, as well as removing it.
      */
-    public static final Permission PROVISION = Jenkins.ADMINISTER;
+    public static final Permission PROVISION = new Permission(
+            Computer.PERMISSIONS, "Provision", Messages._Cloud_ProvisionPermission_Description(), Jenkins.ADMINISTER, PERMISSION_SCOPE
+    );
+
+    /**
+     * Parameter object for {@link hudson.slaves.Cloud}.
+     * @since 2.259
+     */
+    public static final class CloudState {
+        /**
+         * The label under consideration.
+         */
+        @CheckForNull
+        private final Label label;
+        /**
+         * The additional planned capacity for this {@link #label} and provisioned by previous strategies during the
+         * current updating of the {@link NodeProvisioner}.
+         */
+        private final int additionalPlannedCapacity;
+
+        public CloudState(@CheckForNull Label label, int additionalPlannedCapacity) {
+            this.label = label;
+            this.additionalPlannedCapacity = additionalPlannedCapacity;
+        }
+
+        /**
+         * The label under consideration.
+         */
+        @CheckForNull
+        public Label getLabel() {
+            return label;
+        }
+
+        /**
+         * The additional planned capacity for this {@link #getLabel()} and provisioned by previous strategies during
+         * the current updating of the {@link NodeProvisioner}.
+         */
+        public int getAdditionalPlannedCapacity() {
+            return additionalPlannedCapacity;
+        }
+    }
 }

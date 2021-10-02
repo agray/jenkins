@@ -26,6 +26,9 @@ package hudson.tools;
 
 import hudson.Extension;
 import hudson.FilePath;
+import hudson.util.LineEndingConversion;
+import java.io.ObjectStreamException;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
@@ -36,7 +39,7 @@ public class CommandInstaller extends AbstractCommandInstaller {
 
     @DataBoundConstructor
     public CommandInstaller(String label, String command, String toolHome) {
-        super(label, command, toolHome);
+        super(label, LineEndingConversion.convertEOL(command, LineEndingConversion.EOLType.Unix), toolHome);
     }
 
     @Override
@@ -46,11 +49,14 @@ public class CommandInstaller extends AbstractCommandInstaller {
 
     @Override
     public String[] getCommandCall(FilePath script) {
-        String[] cmd = {"sh", "-e", script.getRemote()};
-        return cmd;
+        return new String[]{"sh", "-e", script.getRemote()};
     }
 
-    @Extension
+    private Object readResolve() throws ObjectStreamException {
+        return new CommandInstaller(getLabel(), getCommand(), getToolHome());
+    }
+
+    @Extension @Symbol("command")
     public static class DescriptorImpl extends Descriptor<CommandInstaller> {
 
         @Override

@@ -25,8 +25,8 @@ public class Uptime {
         return System.currentTimeMillis()-startTime;
     }
 
-    @Initializer(after=InitMilestone.JOB_LOADED)
-    public static void init() {
-        Jenkins.getInstance().getExtensionList(Uptime.class).get(0).startTime = System.currentTimeMillis();
+    @Initializer(after=InitMilestone.JOB_CONFIG_ADAPTED)
+    public void init() {
+        startTime = System.currentTimeMillis();
     }
 }

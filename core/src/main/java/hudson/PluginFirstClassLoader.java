@@ -23,17 +23,15 @@
  */
 package hudson;
 
-import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.List;
-
-import org.apache.tools.ant.AntClassLoader;
+import java.util.concurrent.CopyOnWriteArrayList;
+import jenkins.util.AntClassLoader;
 
 /**
  * classLoader which use first /WEB-INF/lib/*.jar and /WEB-INF/classes before core classLoader
@@ -43,11 +41,18 @@ import org.apache.tools.ant.AntClassLoader;
  */
 public class PluginFirstClassLoader
     extends AntClassLoader
-    implements Closeable
 {
-    
-    private List<URL> urls = new ArrayList<URL>();
+    static {
+        registerAsParallelCapable();
+    }
 
+    public PluginFirstClassLoader() {
+        super(null, false);
+    }
+
+    private List<URL> urls = new CopyOnWriteArrayList<>();
+
+    @Override
     public void addPathFiles( Collection<File> paths )
         throws IOException
     {
@@ -65,41 +70,30 @@ public class PluginFirstClassLoader
     {
         return urls;
     }
-    
-    public void close()
+
+    @Override
+    protected Enumeration findResources( String name, boolean skipParent )
         throws IOException
     {
-        cleanup();
+        return super.findResources( name, skipParent );
     }
 
     @Override
-    protected Enumeration findResources( String arg0, boolean arg1 )
+    public Enumeration findResources( String name )
         throws IOException
     {
-        Enumeration enu = super.findResources( arg0, arg1 );
-        return enu;
+        return super.findResources( name );
     }
 
     @Override
-    protected Enumeration findResources( String name )
-        throws IOException
+    public URL getResource( String name )
     {
-        Enumeration enu = super.findResources( name );
-        return enu;
-    }
-
-    @Override
-    public URL getResource( String arg0 )
-    {
-        URL url = super.getResource( arg0 );
-        return url;
+        return super.getResource( name );
     }
 
     @Override
     public InputStream getResourceAsStream( String name )
     {
-        InputStream is = super.getResourceAsStream( name );
-        return is;
-    }   
-    
+        return super.getResourceAsStream( name );
+    }
 }

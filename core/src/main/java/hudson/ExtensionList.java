@@ -23,27 +23,29 @@
  */
 package hudson;
 
-import com.google.common.collect.Lists;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.ExtensionPoint.LegacyInstancesAreScopedToHudson;
 import hudson.init.InitMilestone;
 import hudson.model.Hudson;
-import jenkins.ExtensionComponentSet;
-import jenkins.model.Jenkins;
 import hudson.util.AdaptedIterator;
 import hudson.util.DescriptorList;
-import hudson.util.Memoizer;
 import hudson.util.Iterators;
-import hudson.ExtensionPoint.LegacyInstancesAreScopedToHudson;
-
 import java.util.AbstractList;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Vector;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import jenkins.ExtensionComponentSet;
+import jenkins.model.Jenkins;
+import jenkins.util.io.OnMaster;
 
 /**
  * Retains the known extension instances for the given type 'T'.
@@ -66,13 +68,14 @@ import java.util.logging.Logger;
  * @see jenkins.model.Jenkins#getExtensionList(Class)
  * @see jenkins.model.Jenkins#getDescriptorList(Class)
  */
-public class ExtensionList<T> extends AbstractList<T> {
+public class ExtensionList<T> extends AbstractList<T> implements OnMaster {
     /**
      * @deprecated as of 1.417
      *      Use {@link #jenkins}
      */
+    @Deprecated
     public final Hudson hudson;
-    public final Jenkins jenkins;
+    public final @CheckForNull Jenkins jenkins;
     public final Class<T> extensionType;
 
     /**
@@ -80,6 +83,8 @@ public class ExtensionList<T> extends AbstractList<T> {
      */
     @CopyOnWrite
     private volatile List<ExtensionComponent<T>> extensions;
+
+    private final List<ExtensionListListener> listeners = new CopyOnWriteArrayList<>();
 
     /**
      * Place to store manually registered instances with the per-Hudson scope.
@@ -91,18 +96,20 @@ public class ExtensionList<T> extends AbstractList<T> {
      * @deprecated as of 1.416
      *      Use {@link #ExtensionList(Jenkins, Class)}
      */
+    @Deprecated
     protected ExtensionList(Hudson hudson, Class<T> extensionType) {
         this((Jenkins)hudson,extensionType);
     }
 
     protected ExtensionList(Jenkins jenkins, Class<T> extensionType) {
-        this(jenkins,extensionType,new CopyOnWriteArrayList<ExtensionComponent<T>>());
+        this(jenkins,extensionType, new CopyOnWriteArrayList<>());
     }
 
     /**
      * @deprecated as of 1.416
      *      Use {@link #ExtensionList(Jenkins, Class, CopyOnWriteArrayList)}
      */
+    @Deprecated
     protected ExtensionList(Hudson hudson, Class<T> extensionType, CopyOnWriteArrayList<ExtensionComponent<T>> legacyStore) {
         this((Jenkins)hudson,extensionType,legacyStore);
     }
@@ -119,23 +126,49 @@ public class ExtensionList<T> extends AbstractList<T> {
         this.jenkins = jenkins;
         this.extensionType = extensionType;
         this.legacyInstances = legacyStore;
+        if (jenkins == null) {
+            extensions = Collections.emptyList();
+        }
+    }
+
+    /**
+     * Add a listener to the extension list.
+     * @param listener The listener.
+     */
+    public void addListener(@NonNull ExtensionListListener listener) {
+        listeners.add(listener);
     }
 
     /**
      * Looks for the extension instance of the given type (subclasses excluded),
      * or return null.
      */
-    public <U extends T> U get(Class<U> type) {
+    public @CheckForNull <U extends T> U get(@NonNull Class<U> type) {
         for (T ext : this)
             if(ext.getClass()==type)
                 return type.cast(ext);
         return null;
     }
 
+    /**
+     * Looks for the extension instance of the given type (subclasses excluded),
+     * or throws an IllegalStateException.
+     * 
+     * Meant to simplify call inside @Extension annotated class to retrieve their own instance.
+     */
+    public @NonNull <U extends T> U getInstance(@NonNull Class<U> type) throws IllegalStateException {
+        for (T ext : this)
+            if(ext.getClass()==type)
+                return type.cast(ext);
+        
+        throw new IllegalStateException("The class " + type.getName() + " was not found, potentially not yet loaded");
+    }
+
     @Override
-    public Iterator<T> iterator() {
+    public @NonNull Iterator<T> iterator() {
         // we need to intercept mutation, so for now don't allow Iterator.remove 
         return new AdaptedIterator<ExtensionComponent<T>,T>(Iterators.readOnly(ensureLoaded().iterator())) {
+            @Override
             protected T adapt(ExtensionComponent<T> item) {
                 return item.getInstance();
             }
@@ -149,10 +182,12 @@ public class ExtensionList<T> extends AbstractList<T> {
         return Collections.unmodifiableList(ensureLoaded());
     }
 
+    @Override
     public T get(int index) {
         return ensureLoaded().get(index).getInstance();
     }
     
+    @Override
     public int size() {
         return ensureLoaded().size();
     }
@@ -175,19 +210,43 @@ public class ExtensionList<T> extends AbstractList<T> {
     }
 
     @Override
-    public synchronized boolean remove(Object o) {
+    public boolean remove(Object o) {
+        try {
+            return removeSync(o);
+        } finally {
+            if(extensions!=null) {
+                fireOnChangeListeners();
+            }
+        }
+    }
+
+    @Override
+    public boolean removeAll(Collection<?> c) {
+        boolean removed = false;
+        try {
+            for (Object o : c) {
+                removed |= removeSync(o);
+            }
+            return removed;
+        } finally {
+            if (extensions != null && removed) {
+                fireOnChangeListeners();
+            }
+        }
+    }
+
+    private synchronized boolean removeSync(Object o) {
         boolean removed = removeComponent(legacyInstances, o);
         if(extensions!=null) {
-            List<ExtensionComponent<T>> r = new ArrayList<ExtensionComponent<T>>(extensions);
+            List<ExtensionComponent<T>> r = new ArrayList<>(extensions);
             removed |= removeComponent(r,o);
             extensions = sort(r);
         }
         return removed;
     }
 
-    private <T> boolean removeComponent(Collection<ExtensionComponent<T>> collection, Object t) {
-        for (Iterator<ExtensionComponent<T>> itr = collection.iterator(); itr.hasNext();) {
-            ExtensionComponent<T> c =  itr.next();
+    private boolean removeComponent(Collection<ExtensionComponent<T>> collection, Object t) {
+        for (ExtensionComponent<T> c : collection) {
             if (c.getInstance().equals(t)) {
                 return collection.remove(c);
             }
@@ -209,12 +268,23 @@ public class ExtensionList<T> extends AbstractList<T> {
      *      Prefer automatic registration.
      */
     @Override
-    public synchronized boolean add(T t) {
-        legacyInstances.add(new ExtensionComponent<T>(t));
+    @Deprecated
+    public boolean add(T t) {
+        try {
+            return addSync(t);
+        } finally {
+            if(extensions!=null) {
+                fireOnChangeListeners();
+            }
+        }
+    }
+
+    private synchronized boolean addSync(T t) {
+        legacyInstances.add(new ExtensionComponent<>(t));
         // if we've already filled extensions, add it
         if(extensions!=null) {
-            List<ExtensionComponent<T>> r = new ArrayList<ExtensionComponent<T>>(extensions);
-            r.add(new ExtensionComponent<T>(t));
+            List<ExtensionComponent<T>> r = new ArrayList<>(extensions);
+            r.add(new ExtensionComponent<>(t));
             extensions = sort(r);
         }
         return true;
@@ -240,7 +310,7 @@ public class ExtensionList<T> extends AbstractList<T> {
     private List<ExtensionComponent<T>> ensureLoaded() {
         if(extensions!=null)
             return extensions; // already loaded
-        if(Jenkins.getInstance().getInitLevel().compareTo(InitMilestone.PLUGINS_PREPARED)<0)
+        if (jenkins == null || jenkins.getInitLevel().compareTo(InitMilestone.PLUGINS_PREPARED) < 0)
             return legacyInstances; // can't perform the auto discovery until all plugins are loaded, so just make the legacy instances visible
 
         synchronized (getLoadLock()) {
@@ -265,15 +335,30 @@ public class ExtensionList<T> extends AbstractList<T> {
      * Do not call from anywhere else.
      */
     public void refresh(ExtensionComponentSet delta) {
+        boolean fireOnChangeListeners = false;
         synchronized (getLoadLock()) {
             if (extensions==null)
                 return;     // not yet loaded. when we load it, we'll load everything visible by then, so no work needed
 
             Collection<ExtensionComponent<T>> found = load(delta);
             if (!found.isEmpty()) {
-                List<ExtensionComponent<T>> l = Lists.newArrayList(extensions);
+                List<ExtensionComponent<T>> l = new ArrayList<>(extensions);
                 l.addAll(found);
                 extensions = sort(l);
+                fireOnChangeListeners = true;
+            }
+        }
+        if (fireOnChangeListeners) {
+            fireOnChangeListeners();
+        }
+    }
+
+    private void fireOnChangeListeners() {
+        for (ExtensionListListener listener : listeners) {
+            try {
+                listener.onChange();
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Error firing ExtensionListListener.onChange().", e);
             }
         }
     }
@@ -289,8 +374,10 @@ public class ExtensionList<T> extends AbstractList<T> {
      * Loads all the extensions.
      */
     protected List<ExtensionComponent<T>> load() {
-        if (LOGGER.isLoggable(Level.FINE))
-            LOGGER.log(Level.FINE,"Loading ExtensionList: "+extensionType, new Throwable());
+        LOGGER.fine(() -> String.format("Loading ExtensionList '%s'", extensionType.getName()));
+        if (LOGGER.isLoggable(Level.FINER)) {
+            LOGGER.log(Level.FINER, String.format("Loading ExtensionList '%s' from", extensionType.getName()), new Throwable("Only present for stacktrace information"));
+        }
 
         return jenkins.getPluginManager().getPluginStrategy().findComponents(extensionType, hudson);
     }
@@ -311,7 +398,7 @@ public class ExtensionList<T> extends AbstractList<T> {
      * The implementation should copy a list, do a sort, and return the new instance.
      */
     protected List<ExtensionComponent<T>> sort(List<ExtensionComponent<T>> r) {
-        r = new ArrayList<ExtensionComponent<T>>(r);
+        r = new ArrayList<>(r);
         Collections.sort(r);
         return r;
     }
@@ -320,26 +407,58 @@ public class ExtensionList<T> extends AbstractList<T> {
      * @deprecated as of 1.416
      *      Use {@link #create(Jenkins, Class)}
      */
+    @Deprecated
     public static <T> ExtensionList<T> create(Hudson hudson, Class<T> type) {
         return create((Jenkins)hudson,type);
     }
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     public static <T> ExtensionList<T> create(Jenkins jenkins, Class<T> type) {
         if(type.getAnnotation(LegacyInstancesAreScopedToHudson.class)!=null)
-            return new ExtensionList<T>(jenkins,type);
+            return new ExtensionList<>(jenkins, type);
         else {
-            return new ExtensionList<T>(jenkins,type,staticLegacyInstances.get(type));
+            return new ExtensionList(jenkins, type, staticLegacyInstances.computeIfAbsent(type, key -> new CopyOnWriteArrayList()));
         }
+    }
+
+    /**
+     * Gets the extension list for a given type.
+     * Normally calls {@link Jenkins#getExtensionList(Class)} but falls back to an empty list
+     * in case {@link Jenkins#getInstanceOrNull()} is null.
+     * Thus it is useful to call from {@code all()} methods which need to behave gracefully during startup or shutdown.
+     * @param type the extension point type
+     * @return some list
+     * @since 1.572
+     */
+    public static @NonNull <T> ExtensionList<T> lookup(Class<T> type) {
+        Jenkins j = Jenkins.getInstanceOrNull();
+        return j == null ? create((Jenkins) null, type) : j.getExtensionList(type);
+    }
+
+    /**
+     * Convenience method allowing lookup of the only instance of a given type.
+     * Equivalent to {@code ExtensionList.lookup(Class).get(Class)} if there is one instance,
+     * and throws an {@code IllegalStateException} otherwise.
+     *
+     * @param type The type to look up.
+     * @return the singleton instance of the given type in its list.
+     * @throws IllegalStateException if there are no instances, or more than one
+     *
+     * @since 2.87
+     */
+    public static @NonNull <U> U lookupSingleton(Class<U> type) {
+        ExtensionList<U> all = lookup(type);
+        if (all.size() != 1) {
+            throw new IllegalStateException("Expected 1 instance of " + type.getName() + " but got " + all.size());
+        }
+        return all.get(0);
     }
 
     /**
      * Places to store static-scope legacy instances.
      */
-    private static final Memoizer<Class,CopyOnWriteArrayList> staticLegacyInstances = new Memoizer<Class,CopyOnWriteArrayList>() {
-        public CopyOnWriteArrayList compute(Class key) {
-            return new CopyOnWriteArrayList();
-        }
-    };
+    @SuppressWarnings("rawtypes")
+    private static final Map<Class, CopyOnWriteArrayList> staticLegacyInstances = new ConcurrentHashMap<>();
 
     /**
      * Exposed for the test harness to clear all legacy extension instances.

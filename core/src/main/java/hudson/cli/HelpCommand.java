@@ -23,13 +23,13 @@
  */
 package hudson.cli;
 
+import hudson.AbortException;
 import hudson.Extension;
-import jenkins.model.Jenkins;
-
 import java.util.Map;
 import java.util.TreeMap;
-
+import jenkins.model.Jenkins;
 import org.kohsuke.args4j.Argument;
+import org.springframework.security.access.AccessDeniedException;
 
 /**
  * Show the list of all commands.
@@ -48,11 +48,10 @@ public class HelpCommand extends CLICommand {
     }
 
     @Override
-    protected int run() {
-        if (!Jenkins.getInstance().hasPermission(Jenkins.READ)) {
-            stderr.println("You must authenticate to access this Jenkins.\n"
-                    + "Use --username/--password/--password-file parameters or login command.");
-            return -1;
+    protected int run() throws Exception {
+        if (!Jenkins.get().hasPermission(Jenkins.READ)) {
+            throw new AccessDeniedException("You must authenticate to access this Jenkins.\n"
+                    + CLI.usage());
         }
 
         if (command != null)
@@ -64,7 +63,7 @@ public class HelpCommand extends CLICommand {
     }
 
     private int showAllCommands() {
-        Map<String,CLICommand> commands = new TreeMap<String,CLICommand>();
+        Map<String,CLICommand> commands = new TreeMap<>();
         for (CLICommand c : CLICommand.all())
             commands.put(c.getName(),c);
 
@@ -76,12 +75,11 @@ public class HelpCommand extends CLICommand {
         return 0;
     }
 
-    private int showCommandDetails() {
+    private int showCommandDetails() throws Exception {
         CLICommand command = CLICommand.clone(this.command);
         if (command == null) {
-            stderr.format("No such command %s. Awailable commands are: ", this.command);
             showAllCommands();
-            return -1;
+            throw new AbortException(String.format("No such command %s. Available commands are above. ", this.command));
         }
 
         command.printUsage(stderr, command.getCmdLineParser());

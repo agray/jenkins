@@ -23,8 +23,9 @@
  */
 package hudson.model.queue;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.model.Queue.Executable;
-
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
@@ -34,13 +35,17 @@ import java.lang.reflect.Method;
  * @author Kohsuke Kawaguchi
  */
 public class Executables {
+    
     /**
-     * Due to the return type change in {@link Executable}, the caller needs a special precaution now.
+     * Due to the return type change in {@link Executable} in 1.377, the caller needs a special precaution now.
+     * @param e Executable
+     * @return Discovered subtask
      */
-    public static SubTask getParentOf(Executable e) {
+    public static @NonNull SubTask getParentOf(@NonNull Executable e) 
+            throws Error, RuntimeException {
         try {
-            return _getParentOf(e);
-        } catch (AbstractMethodError _) {
+            return e.getParent();
+        } catch (AbstractMethodError ignored) { // will fallback to a private implementation
             try {
                 Method m = e.getClass().getMethod("getParent");
                 m.setAccessible(true);
@@ -59,31 +64,22 @@ public class Executables {
     }
 
     /**
-     * A pointless function to work around what appears to be a HotSpot problem. See JENKINS-5756 and bug 6933067
-     * on BugParade for more details.
-     */
-    private static SubTask _getParentOf(Executable e) {
-        return e.getParent();
-    }
-
-    /**
      * Returns the estimated duration for the executable.
+     * If the Executable is null the Estimated Duration can't be evaluated, then -1 is returned.
+     * This can happen if Computer.getIdleStartMilliseconds() is called before the executable is set to non-null in Computer.run()
+     * or if the executor thread exits prematurely, see JENKINS-30456
      * Protects against {@link AbstractMethodError}s if the {@link Executable} implementation
-     * was compiled against Hudson < 1.383
+     * was compiled against Hudson prior to 1.383
+     * @param e Executable item
+     * @return the estimated duration for a given executable, -1 if the executable is null
+     * @deprecated call {@link Executable#getEstimatedDuration} directly
      */
-    public static long getEstimatedDurationFor(Executable e) {
-        try {
-            return _getEstimatedDuration(e);
-        } catch (AbstractMethodError error) {
-            return e.getParent().getEstimatedDuration();
+    @Deprecated
+    public static long getEstimatedDurationFor(@CheckForNull Executable e) {
+        if (e == null) {
+            return -1;
         }
-    }
-
-    /**
-     * A pointless function to work around what appears to be a HotSpot problem. See JENKINS-5756 and bug 6933067
-     * on BugParade for more details.
-     */
-    private static long _getEstimatedDuration(Executable e) {
         return e.getEstimatedDuration();
     }
+
 }

@@ -23,12 +23,10 @@
  */
 package hudson.security;
 
-import jenkins.model.Jenkins;
+import static java.util.logging.Level.SEVERE;
 
 import java.io.IOException;
 import java.util.logging.Logger;
-import static java.util.logging.Level.SEVERE;
-
 import javax.servlet.Filter;
 import javax.servlet.FilterChain;
 import javax.servlet.FilterConfig;
@@ -36,10 +34,11 @@ import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
-
-import org.acegisecurity.AuthenticationManager;
-import org.acegisecurity.ui.rememberme.RememberMeServices;
-import org.acegisecurity.userdetails.UserDetailsService;
+import javax.servlet.http.HttpServletResponse;
+import jenkins.model.Jenkins;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.web.authentication.RememberMeServices;
 
 /**
  * {@link Filter} that Jenkins uses to implement security support.
@@ -66,43 +65,47 @@ public class HudsonFilter implements Filter {
     private FilterConfig filterConfig;
 
     /**
-     * {@link AuthenticationManager} proxy so that the acegi filter chain can stay the same
+     * {@link AuthenticationManager} proxy so that the Spring Security filter chain can stay the same
      * even when security setting is reconfigured.
      *
      * @deprecated in 1.271.
      * This proxy always delegate to {@code Hudson.getInstance().getSecurityRealm().getSecurityComponents().manager},
      * so use that instead.
      */
+    @Deprecated
     public static final AuthenticationManagerProxy AUTHENTICATION_MANAGER = new AuthenticationManagerProxy();
 
     /**
-     * {@link UserDetailsService} proxy so that the acegi filter chain can stay the same
+     * {@link UserDetailsService} proxy so that the Spring Security filter chain can stay the same
      * even when security setting is reconfigured.
      *
      * @deprecated in 1.271.
      * This proxy always delegate to {@code Hudson.getInstance().getSecurityRealm().getSecurityComponents().userDetails},
      * so use that instead.
      */
+    @Deprecated
     public static final UserDetailsServiceProxy USER_DETAILS_SERVICE_PROXY = new UserDetailsServiceProxy();
     
     /**
-     * {@link RememberMeServices} proxy so that the acegi filter chain can stay the same
+     * {@link RememberMeServices} proxy so that the Spring Security filter chain can stay the same
      * even when security setting is reconfigured.
      *
      * @deprecated in 1.271.
      * This proxy always delegate to {@code Hudson.getInstance().getSecurityRealm().getSecurityComponents().rememberMe},
      * so use that instead.
      */
+    @Deprecated
     public static final RememberMeServicesProxy REMEMBER_ME_SERVICES_PROXY = new RememberMeServicesProxy();
 
+    @Override
     public void init(FilterConfig filterConfig) throws ServletException {
         this.filterConfig = filterConfig;
         // this is how we make us available to the rest of Hudson.
         filterConfig.getServletContext().setAttribute(HudsonFilter.class.getName(),this);
         try {
-            Jenkins hudson = Jenkins.getInstance();
+            Jenkins hudson = Jenkins.getInstanceOrNull();
             if (hudson != null) {
-                // looks like we are initialized after Hudson came into being. initialize it now. See #3069
+                // looks like we are initialized after Hudson came into being. initialize it now. See JENKINS-3069
                 LOGGER.fine("Security wasn't initialized; Initializing it...");
                 SecurityRealm securityRealm = hudson.getSecurityRealm();
                 reset(securityRealm);
@@ -110,7 +113,7 @@ public class HudsonFilter implements Filter {
                 LOGGER.fine("Security initialized");
             }
         } catch (ExceptionInInitializerError e) {
-            // see HUDSON-4592. In some containers this happens before
+            // see JENKINS-4592. In some containers this happens before
             // WebAppMain.contextInitialized kicks in, which makes
             // the whole thing fail hard before a nicer error check
             // in WebAppMain.contextInitialized. So for now,
@@ -129,12 +132,12 @@ public class HudsonFilter implements Filter {
     /**
      * Reset the proxies and filter for a change in {@link SecurityRealm}.
      */
-    public void reset(SecurityRealm securityRealm) throws ServletException {
+    public synchronized void reset(SecurityRealm securityRealm) throws ServletException {
         if (securityRealm != null) {
             SecurityRealm.SecurityComponents sc = securityRealm.getSecurityComponents();
-            AUTHENTICATION_MANAGER.setDelegate(sc.manager);
-            USER_DETAILS_SERVICE_PROXY.setDelegate(sc.userDetails);
-            REMEMBER_ME_SERVICES_PROXY.setDelegate(sc.rememberMe);
+            AUTHENTICATION_MANAGER.setDelegate(sc.manager2);
+            USER_DETAILS_SERVICE_PROXY.setDelegate(sc.userDetails2);
+            REMEMBER_ME_SERVICES_PROXY.setDelegate(sc.rememberMe2);
             // make sure this.filter is always a valid filter.
             Filter oldf = this.filter;
             Filter newf = securityRealm.createFilter(this.filterConfig);
@@ -151,9 +154,13 @@ public class HudsonFilter implements Filter {
         }
     }
 
+    @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain) throws IOException, ServletException {
         LOGGER.entering(HudsonFilter.class.getName(), "doFilter");
-        
+
+        // this is not the best place to do it, but doing it here makes the patch smaller.
+        ((HttpServletResponse)response).setHeader("X-Content-Type-Options", "nosniff");
+
         // to deal with concurrency, we need to capture the object.
         Filter f = filter;
 
@@ -165,6 +172,7 @@ public class HudsonFilter implements Filter {
         }
     }
 
+    @Override
     public void destroy() {
         // the filter can be null if the filter is not initialized yet.
         if(filter != null)

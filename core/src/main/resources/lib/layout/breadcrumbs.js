@@ -24,11 +24,20 @@ var breadcrumbs = (function() {
     // logger = function() { console.log.apply(console,arguments) };  // uncomment this line to enable logging
 
     function makeMenuHtml(icon,displayName) {
-        return (icon!=null ? "<img src='"+icon+"' width=24 height=24 style='margin: 2px;' alt=''> " : "")+displayName;
+        var displaynameSpan = '<span>' + displayName + '</span>';
+        if (icon === null) return "<span style='margin: 2px 4px 2px 2px;' />" + displaynameSpan;
+
+        // TODO: move this to the API response in a clean way
+        var isSvgSprite = icon.toLowerCase().indexOf('svg#') !== -1;
+        return isSvgSprite
+            ? "<svg class='svg-icon' width='24' height='24' style='margin: 2px 4px 2px 2px;' aria-label='' focusable='false'>" +
+                "<use href='" + icon + "' />" +
+                "</svg>" + displaynameSpan
+            : "<img src='"+icon+"' width=24 height=24 style='margin: 2px 4px 2px 2px;' alt=''>" + displaynameSpan;
     }
 
     Event.observe(window,"load",function(){
-      menu = new YAHOO.widget.Menu("breadcrumb-menu", {position:"dynamic", hidedelay:1000, zIndex:2001});
+      menu = new YAHOO.widget.Menu("breadcrumb-menu", {position:"dynamic", hidedelay:1000, zIndex:2001, scrollincrement: 2});
     });
 
 
@@ -61,6 +70,9 @@ var breadcrumbs = (function() {
             var form = document.createElement('form');
             form.setAttribute('method', cfg.post ? 'POST' : 'GET');
             form.setAttribute('action', cfg.url);
+            if (cfg.post) {
+                crumb.appendToForm(form);
+            }
             document.body.appendChild(form);
             form.submit();
         }
@@ -92,6 +104,9 @@ var breadcrumbs = (function() {
      */
     var menuSelector = (function() {
         var menuSelector = $(document.createElement("div"));
+        var menuSelectorTarget;
+        var parentToUpdate;
+
         document.body.appendChild(menuSelector);
         menuSelector.id = 'menuSelector';
 
@@ -101,17 +116,33 @@ var breadcrumbs = (function() {
          */
         menuSelector.show = function(target) {
             var xy = Dom.getXY(target);
+
             if ($(target).hasClassName("inside"))
                 xy[0] -= this.offsetWidth;  // show the menu selector inside the text
+
+            if ($(target).hasClassName("inverse")) {
+                menuSelector.addClassName("inverse");
+            } else {
+                menuSelector.removeClassName("inverse");
+            }
+
             xy[0] += target.offsetWidth;
             xy[1] += target.offsetHeight/2 - this.offsetHeight/2;
             Dom.setXY(this, xy);
             this.target = target;
 
             this.style.visibility = "visible";
+
+            menuSelectorTarget = target;
+            var updateParentSelector = menuSelectorTarget.getAttribute('update-parent-class');
+            if (updateParentSelector) {
+                parentToUpdate = $(menuSelectorTarget).up(updateParentSelector);
+            }
         };
         menuSelector.hide = function() {
             this.style.visibility = "hidden";
+            menuSelectorTarget = undefined;
+            parentToUpdate = undefined;
         };
         menuSelector.observe("click",function () {
             invokeContextMenu(this.target);
@@ -124,12 +155,22 @@ var breadcrumbs = (function() {
         }.bind(menuSelector), 750);
 
         menuSelector.observe("mouseover",function () {
-            logger("mouse entered 'v'");
+            if (menuSelectorTarget) {
+                if (parentToUpdate) {
+                    parentToUpdate.addClassName('model-link-active');
+                }
+                menuSelectorTarget.addClassName('mouseIsOverMenuSelector');
+            }
             canceller.cancel();
         });
         menuSelector.observe("mouseout",function () {
-            logger("mouse left 'v'");
             canceller.schedule();
+            if (menuSelectorTarget) {
+                if (parentToUpdate) {
+                    parentToUpdate.removeClassName('model-link-active');
+                }
+                menuSelectorTarget.removeClassName('mouseIsOverMenuSelector');
+            }
         });
         menuSelector.canceller = canceller;
 
@@ -171,7 +212,11 @@ var breadcrumbs = (function() {
                 onComplete:function (x) {
                     var a = x.responseText.evalJSON().items;
                     function fillMenuItem(e) {
-                        e.text = makeMenuHtml(e.icon, e.displayName);
+                        if (e.header) {
+                            e.text = makeMenuHtml(e.icon, "<span class='header'>" + e.displayName + "</span>");
+                        } else {
+                            e.text = makeMenuHtml(e.icon, e.displayName);
+                        }
                         if (e.subMenu!=null)
                             e.subMenu = {id:"submenu"+(iota++), itemdata:e.subMenu.items.each(fillMenuItem)};
                         if (e.requiresConfirmation) {
@@ -221,6 +266,10 @@ var breadcrumbs = (function() {
         a.observe("click",function() {
             invokeContextMenu(this,"childrenContextMenu");
         })
+    });
+
+    Behaviour.specify("#breadcrumbs A", 'breadcrumbs', 0, function (a) {
+        $(a).addClassName('breadcrumbBarAnchor');
     });
 
     /**

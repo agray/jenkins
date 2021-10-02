@@ -23,17 +23,18 @@
  */
 package hudson.model;
 
+import hudson.Extension;
+import hudson.cli.CLICommand;
+import java.io.File;
+import java.io.IOException;
+import java.util.Objects;
+import javax.servlet.ServletException;
 import net.sf.json.JSONObject;
+import org.apache.commons.fileupload.FileItem;
+import org.apache.commons.io.FileUtils;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.StaplerRequest;
-import hudson.Extension;
-import hudson.FilePath;
-import hudson.cli.CLICommand;
-import org.apache.commons.fileupload.FileItem;
-
-import java.io.IOException;
-import java.io.File;
-import javax.servlet.ServletException;
 
 /**
  * {@link ParameterDefinition} for doing file upload.
@@ -44,11 +45,21 @@ import javax.servlet.ServletException;
  * @author Kohsuke Kawaguchi
  */
 public class FileParameterDefinition extends ParameterDefinition {
+
+    /**
+     * @since 2.281
+     */
     @DataBoundConstructor
-    public FileParameterDefinition(String name, String description) {
-        super(name, description);
+    public FileParameterDefinition(String name) {
+        super(name);
     }
 
+    public FileParameterDefinition(String name, String description) {
+        this(name);
+        setDescription(description);
+    }
+
+    @Override
     public FileParameterValue createValue(StaplerRequest req, JSONObject jo) {
         FileParameterValue p = req.bindJSON(FileParameterValue.class, jo);
         p.setLocation(getName());
@@ -56,7 +67,7 @@ public class FileParameterDefinition extends ParameterDefinition {
         return p;
     }
 
-    @Extension
+    @Extension @Symbol({"file","fileParam"})
     public static class DescriptorImpl extends ParameterDescriptor {
         @Override
         public String getDisplayName() {
@@ -74,12 +85,9 @@ public class FileParameterDefinition extends ParameterDefinition {
         FileItem src;
         try {
             src = req.getFileItem( getName() );
-        } catch (ServletException e) {
+        } catch (ServletException | IOException e) {
             // Not sure what to do here. We might want to raise this
             // but that would involve changing the throws for this call
-            return null;
-        } catch (IOException e) {
-            // ditto above
             return null;
         }
         if ( src == null ) {
@@ -101,16 +109,47 @@ public class FileParameterDefinition extends ParameterDefinition {
         return possiblyPathName;
     }
 
+    @SuppressWarnings("deprecation")
     @Override
     public ParameterValue createValue(CLICommand command, String value) throws IOException, InterruptedException {
         // capture the file to the server
-        FilePath src = new FilePath(command.checkChannel(),value);
         File local = File.createTempFile("jenkins","parameter");
-        src.copyTo(new FilePath(local));
+        String name;
+        if (value.isEmpty()) {
+            FileUtils.copyInputStreamToFile(command.stdin, local);
+            name = "stdin";
+        } else {
+            command.checkChannel();
+            return null; // never called
+        }
 
-        FileParameterValue p = new FileParameterValue(getName(), local, src.getName());
+        FileParameterValue p = new FileParameterValue(getName(), local, name);
         p.setDescription(getDescription());
         p.setLocation(getName());
         return p;
+    }
+
+    @Override
+    public int hashCode() {
+        if (FileParameterDefinition.class != getClass()) {
+            return super.hashCode();
+        }
+        return Objects.hash(getName(), getDescription());
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (FileParameterDefinition.class != getClass())
+            return super.equals(obj);
+        if (this == obj)
+            return true;
+        if (obj == null)
+            return false;
+        if (getClass() != obj.getClass())
+            return false;
+        FileParameterDefinition other = (FileParameterDefinition) obj;
+        if (!Objects.equals(getName(), other.getName()))
+            return false;
+        return Objects.equals(getDescription(), other.getDescription());
     }
 }

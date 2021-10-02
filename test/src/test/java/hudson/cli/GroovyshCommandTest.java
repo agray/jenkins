@@ -24,25 +24,27 @@
 
 package hudson.cli;
 
-import static hudson.cli.CLICommandInvoker.Matcher.*;
+import static hudson.cli.CLICommandInvoker.Matcher.hasNoErrorOutput;
+import static hudson.cli.CLICommandInvoker.Matcher.succeeded;
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.MatcherAssert.assertThat;
+
 import jenkins.model.Jenkins;
 import org.apache.tools.ant.filters.StringInputStream;
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.junit.Assert.*;
 import org.junit.Rule;
 import org.junit.Test;
-import org.jvnet.hudson.test.Bug;
+import org.jvnet.hudson.test.Issue;
 import org.jvnet.hudson.test.JenkinsRule;
 
 public class GroovyshCommandTest {
 
     @Rule public JenkinsRule r = new JenkinsRule();
 
-    @Bug(17929)
+    @Issue("JENKINS-17929")
     @Test public void authentication() throws Exception {
         CLICommandInvoker.Result result = new CLICommandInvoker(r, new GroovyshCommand())
-            .authorizedTo(Jenkins.READ, Jenkins.RUN_SCRIPTS)
-            .withStdin(new StringInputStream("println(jenkins.model.Jenkins.instance.getClass().name)\nquit\n"))
+            .authorizedTo(Jenkins.READ, Jenkins.ADMINISTER)
+            .withStdin(new StringInputStream("println(jenkins.model.Jenkins.instance.getClass().name)\n:quit\n"))
             .invoke();
         assertThat(result, succeeded());
         assertThat(result, hasNoErrorOutput());

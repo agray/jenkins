@@ -1,12 +1,13 @@
 package jenkins.slaves;
 
 import hudson.Extension;
+import hudson.init.Terminator;
 import hudson.model.Computer;
-import org.jenkinsci.remoting.nio.NioChannelHub;
-
 import java.io.IOException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import jenkins.util.SystemProperties;
+import org.jenkinsci.remoting.nio.NioChannelHub;
 
 /**
  * Singleton holder of {@link NioChannelHub}
@@ -34,10 +35,18 @@ public class NioChannelSelector {
         return hub;
     }
 
+    @Terminator
+    public void cleanUp() throws IOException {
+        if (hub!=null) {
+            hub.close();
+            hub = null;
+        }
+    }
+
     /**
      * Escape hatch to disable use of NIO.
      */
-    public static boolean DISABLED = Boolean.getBoolean(NioChannelSelector.class.getName()+".disabled");
+    public static boolean DISABLED = SystemProperties.getBoolean(NioChannelSelector.class.getName()+".disabled");
 
     private static final Logger LOGGER = Logger.getLogger(NioChannelSelector.class.getName());
 }

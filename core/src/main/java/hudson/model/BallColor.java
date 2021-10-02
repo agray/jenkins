@@ -24,13 +24,13 @@
 package hudson.model;
 
 import hudson.util.ColorPalette;
+import java.awt.Color;
+import java.util.Locale;
 import jenkins.model.Jenkins;
+import org.jenkins.ui.icon.Icon;
 import org.jvnet.localizer.LocaleProvider;
 import org.jvnet.localizer.Localizable;
 import org.kohsuke.stapler.Stapler;
-
-import java.awt.*;
-import java.util.Locale;
 
 /**
  * Ball color used for the build status indication.
@@ -48,7 +48,7 @@ import java.util.Locale;
  * Hudson started to overload colors &mdash; for example grey could mean
  * either disabled, aborted, or not yet built. As a result, {@link BallColor}
  * becomes more like a "logical" color, in the sense that different {@link BallColor}
- * values can map to the same RGB color. See issue #956.
+ * values can map to the same RGB color. See JENKINS-956.
  *
  * @author Kohsuke Kawaguchi
  */
@@ -60,27 +60,47 @@ public enum BallColor implements StatusIcon {
     BLUE("blue",Messages._BallColor_Success(), ColorPalette.BLUE),
     BLUE_ANIME("blue_anime",Messages._BallColor_InProgress(), ColorPalette.BLUE),
     // for historical reasons they are called grey.
-    GREY("grey",Messages._BallColor_Pending(), ColorPalette.GREY),
+    GREY("grey",Messages._BallColor_Disabled(), ColorPalette.GREY),
     GREY_ANIME("grey_anime",Messages._BallColor_InProgress(), ColorPalette.GREY),
 
     DISABLED("disabled",Messages._BallColor_Disabled(), ColorPalette.GREY),
     DISABLED_ANIME("disabled_anime",Messages._BallColor_InProgress(), ColorPalette.GREY),
-    ABORTED("aborted",Messages._BallColor_Aborted(), ColorPalette.GREY),
-    ABORTED_ANIME("aborted_anime",Messages._BallColor_InProgress(), ColorPalette.GREY),
-    NOTBUILT("nobuilt",Messages._BallColor_NotBuilt(), ColorPalette.GREY),
-    NOTBUILT_ANIME("nobuilt_anime",Messages._BallColor_InProgress(), ColorPalette.GREY),
+    ABORTED("aborted",Messages._BallColor_Aborted(), ColorPalette.DARK_GREY),
+    ABORTED_ANIME("aborted_anime",Messages._BallColor_InProgress(), ColorPalette.DARK_GREY),
+    NOTBUILT("nobuilt",Messages._BallColor_NotBuilt(), ColorPalette.LIGHT_GREY),
+    NOTBUILT_ANIME("nobuilt_anime",Messages._BallColor_InProgress(), ColorPalette.LIGHT_GREY)
     ;
 
     private final Localizable description;
+    private final String iconName;
+    private final String iconClassName;
     private final String image;
     private final Color baseColor;
 
     BallColor(String image, Localizable description, Color baseColor) {
+        this.iconName = Icon.toNormalizedIconName(image);
+        this.iconClassName = Icon.toNormalizedIconNameClass(image);
         this.baseColor = baseColor;
         // name() is not usable in the constructor, so I have to repeat the name twice
         // in the constants definition.
         this.image = image+ (image.endsWith("_anime")?".gif":".png");
         this.description = description;
+    }
+
+    /**
+     * Get the status ball icon name.
+     * @return The status ball icon name.
+     */
+    public String getIconName() {
+        return iconName;
+    }
+
+    /**
+     * Get the status ball icon class spec name.
+     * @return The status ball icon class spec name.
+     */
+    public String getIconClassName() {
+        return iconClassName;
     }
 
     /**
@@ -90,6 +110,7 @@ public enum BallColor implements StatusIcon {
         return image;
     }
 
+    @Override
     public String getImageOf(String size) {
         return Stapler.getCurrentRequest().getContextPath()+ Jenkins.RESOURCE_PATH+"/images/"+size+'/'+image;
     }
@@ -97,6 +118,7 @@ public enum BallColor implements StatusIcon {
     /**
      * Gets the human-readable description used as img/@alt.
      */
+    @Override
     public String getDescription() {
         return description.toString(LocaleProvider.getLocale());
     }
@@ -112,7 +134,7 @@ public enum BallColor implements StatusIcon {
      * Returns the {@link #getBaseColor()} in the "#RRGGBB" format.
      */
     public String getHtmlBaseColor() {
-        return String.format("#%06X",baseColor.getRGB()&0xFFFFFF);
+        return String.format("#%06X", baseColor.getRGB() & 0xFFFFFF);
     }
 
     /**

@@ -23,31 +23,42 @@
  */
 package jenkins.model;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
-import net.sf.json.JSONObject;
-import org.kohsuke.stapler.StaplerRequest;
-
+import hudson.security.Permission;
 import java.io.IOException;
+import net.sf.json.JSONException;
+import net.sf.json.JSONObject;
+import org.jenkinsci.Symbol;
+import org.kohsuke.stapler.StaplerRequest;
 
 /**
  * Configures global SCM retry count default.
  *
  * @author Kohsuke Kawaguchi
  */
-@Extension(ordinal=395)
+@Extension(ordinal=395) @Symbol("scmRetryCount")
 public class GlobalSCMRetryCountConfiguration extends GlobalConfiguration {
     public int getScmCheckoutRetryCount() {
-        return Jenkins.getInstance().getScmCheckoutRetryCount();
+        return Jenkins.get().getScmCheckoutRetryCount();
     }
 
     @Override
     public boolean configure(StaplerRequest req, JSONObject json) throws FormException {
         try {
             // for compatibility reasons, this value is stored in Jenkins
-            Jenkins.getInstance().setScmCheckoutRetryCount(json.getInt("scmCheckoutRetryCount"));
+            Jenkins.get().setScmCheckoutRetryCount(json.getInt("scmCheckoutRetryCount"));
             return true;
         } catch (IOException e) {
             throw new FormException(e,"quietPeriod");
+        } catch (JSONException e) {
+            throw new FormException(e.getMessage(), "quietPeriod");
         }
+    }
+
+    @NonNull
+    @Override
+    public Permission getRequiredGlobalConfigPagePermission() {
+        return Jenkins.MANAGE;
     }
 }

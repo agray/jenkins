@@ -25,18 +25,18 @@ package hudson.node_monitors;
 
 import hudson.Extension;
 import hudson.FilePath;
-import hudson.FilePath.FileCallable;
 import hudson.model.Computer;
 import hudson.model.Node;
-import hudson.remoting.Callable;
-import jenkins.model.Jenkins;
 import hudson.node_monitors.DiskSpaceMonitorDescriptor.DiskSpace;
+import hudson.remoting.Callable;
 import hudson.remoting.VirtualChannel;
-import org.kohsuke.stapler.DataBoundConstructor;
-
 import java.io.File;
 import java.io.IOException;
 import java.text.ParseException;
+import jenkins.MasterToSlaveFileCallable;
+import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
+import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
  * Monitors the disk space of "/tmp".
@@ -58,10 +58,23 @@ public class TemporarySpaceMonitor extends AbstractDiskSpaceMonitor {
     @Override
     public String getColumnCaption() {
         // Hide this column from non-admins
-        return Jenkins.getInstance().hasPermission(Jenkins.ADMINISTER) ? super.getColumnCaption() : null;
+        return Jenkins.get().hasPermission(Jenkins.ADMINISTER) ? super.getColumnCaption() : null;
     }
 
-    public static final DiskSpaceMonitorDescriptor DESCRIPTOR = new DiskSpaceMonitorDescriptor() {
+    /**
+     * @deprecated as of 2.0
+     *      Use injection
+     */
+    @Deprecated
+    public static /*almost final*/ DiskSpaceMonitorDescriptor DESCRIPTOR;
+
+    @Extension @Symbol("tmpSpace")
+    public static class DescriptorImpl extends DiskSpaceMonitorDescriptor {
+        public DescriptorImpl() {
+            DESCRIPTOR = this;
+        }
+
+        @Override
         public String getDisplayName() {
             return Messages.TemporarySpaceMonitor_DisplayName();
         }
@@ -76,14 +89,18 @@ public class TemporarySpaceMonitor extends AbstractDiskSpaceMonitor {
 
             return p.asCallableWith(new GetTempSpace());
         }
-    };
+    }
 
-    @Extension
+    /**
+     * @deprecated as of 2.0
+     */
+    @Deprecated
     public static DiskSpaceMonitorDescriptor install() {
         return DESCRIPTOR;
     }
     
-    protected static final class GetTempSpace implements FileCallable<DiskSpace> {
+    protected static final class GetTempSpace extends MasterToSlaveFileCallable<DiskSpace> {
+        @Override
         public DiskSpace invoke(File f, VirtualChannel channel) throws IOException {
                 // if the disk is really filled up we can't even create a single file,
                 // so calling File.createTempFile and figuring out the directory won't reliably work.

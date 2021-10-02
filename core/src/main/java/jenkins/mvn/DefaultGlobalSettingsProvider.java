@@ -4,7 +4,7 @@ import hudson.Extension;
 import hudson.FilePath;
 import hudson.model.AbstractBuild;
 import hudson.model.TaskListener;
-
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
@@ -23,7 +23,7 @@ public class DefaultGlobalSettingsProvider extends GlobalSettingsProvider {
         return null;
     }
 
-    @Extension(ordinal = 99)
+    @Extension(ordinal = 99) @Symbol("standard")
     public static class DescriptorImpl extends GlobalSettingsProviderDescriptor {
 
         @Override

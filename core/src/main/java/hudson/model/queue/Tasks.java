@@ -23,15 +23,15 @@
  */
 package hudson.model.queue;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.model.Queue;
+import hudson.model.Queue.Item;
 import hudson.model.Queue.Task;
-import hudson.security.ACL;
-import org.acegisecurity.Authentication;
-
 import java.util.Collection;
-import java.util.Collections;
-import javax.annotation.Nonnull;
 import jenkins.security.QueueItemAuthenticator;
-import jenkins.security.QueueItemAuthenticatorConfiguration;
+import jenkins.security.QueueItemAuthenticatorProvider;
+import org.springframework.security.core.Authentication;
 
 /**
  * Convenience methods around {@link Task} and {@link SubTask}.
@@ -41,91 +41,84 @@ import jenkins.security.QueueItemAuthenticatorConfiguration;
  */
 public class Tasks {
 
-    /**
-     * A pointless function to work around what appears to be a HotSpot problem. See JENKINS-5756 and bug 6933067
-     * on BugParade for more details.
-     */
-    private static Collection<? extends SubTask> _getSubTasksOf(Task task) {
+    /** @deprecated call {@link Task#getSubTasks} directly */
+    @Deprecated
+    public static Collection<? extends SubTask> getSubTasksOf(Task task) {
         return task.getSubTasks();
     }
 
-    public static Collection<? extends SubTask> getSubTasksOf(Task task) {
-        try {
-            return _getSubTasksOf(task);
-        } catch (AbstractMethodError e) {
-            return Collections.singleton(task);
-        }
-    }
-
-    /**
-     * A pointless function to work around what appears to be a HotSpot problem. See JENKINS-5756 and bug 6933067
-     * on BugParade for more details.
-     */
-    private static Object _getSameNodeConstraintOf(SubTask t) {
+    /** @deprecated call {@link SubTask#getSameNodeConstraint} directly */
+    @Deprecated
+    public static Object getSameNodeConstraintOf(SubTask t) {
         return t.getSameNodeConstraint();
     }
 
-    public static Object getSameNodeConstraintOf(SubTask t) {
-        try {
-            return _getSameNodeConstraintOf(t);
-        } catch (AbstractMethodError e) {
-            return null;
-        }
-    }
-
-    /**
-     * A pointless function to work around what appears to be a HotSpot problem. See JENKINS-5756 and bug 6933067
-     * on BugParade for more details.
-     */
-    public static Task _getOwnerTaskOf(SubTask t) {
+    /** deprecated call {@link SubTask#getOwnerTask} directly */
+    @Deprecated
+    public static @NonNull Task getOwnerTaskOf(@NonNull SubTask t) {
         return t.getOwnerTask();
     }
 
-    public static Task getOwnerTaskOf(SubTask t) {
-        try {
-            return _getOwnerTaskOf(t);
-        } catch (AbstractMethodError e) {
-            return (Task)t;
+    /**
+     * Gets the {@link hudson.model.Item} most closely associated with the supplied {@link SubTask}.
+     * @param t the {@link SubTask}.
+     * @return the {@link hudson.model.Item} associated with the {@link SubTask} or {@code null} if this
+     * {@link SubTask} is not associated with an {@link hudson.model.Item}
+     * @since 2.55
+     */
+    @CheckForNull
+    public static hudson.model.Item getItemOf(@NonNull SubTask t) {
+        Queue.Task p = t.getOwnerTask();
+        while (!(p instanceof hudson.model.Item)) {
+            Queue.Task o = p.getOwnerTask();
+            if (o == p) {
+                break;
+            }
+            p = o;
         }
+        return p instanceof hudson.model.Item ? (hudson.model.Item)p : null;
     }
 
-    /**
-     * A pointless function to work around what appears to be a HotSpot problem. See JENKINS-5756 and bug 6933067
-     * on BugParade for more details.
-     */
-    private static Authentication _getDefaultAuthenticationOf(Task t) {
+    /** @deprecated call {@link Queue.Task#getDefaultAuthentication()} directly */
+    @Deprecated
+    @NonNull
+    public static org.acegisecurity.Authentication getDefaultAuthenticationOf(Task t) {
         return t.getDefaultAuthentication();
     }
 
-    /**
-     * @param t a task
-     * @return {@link Task#getDefaultAuthentication}, or {@link ACL#SYSTEM}
-     * @since 1.520
-     */
-    public static Authentication getDefaultAuthenticationOf(Task t) {
-        try {
-            return _getDefaultAuthenticationOf(t);
-        } catch (AbstractMethodError e) {
-            return ACL.SYSTEM;
-        }
+    /** @deprecated call {@link Queue.Task#getDefaultAuthentication(Item)} directly */
+    @Deprecated
+    @NonNull
+    public static org.acegisecurity.Authentication getDefaultAuthenticationOf(Task t, Item item) {
+        return t.getDefaultAuthentication(item);
     }
 
     /**
      * Finds what authentication a task is likely to be run under when scheduled.
-     * The actual authentication after scheduling ({@link hudson.model.Queue.Item#authenticate}) might differ,
-     * in case some {@link QueueItemAuthenticator#authenticate(hudson.model.Queue.Item)} takes (for example) actions into consideration.
+     * The actual authentication after scheduling ({@link hudson.model.Queue.Item#authenticate2}) might differ,
+     * in case some {@link QueueItemAuthenticator#authenticate2(hudson.model.Queue.Item)} takes (for example) actions into consideration.
      * @param t a task
-     * @return an authentication as specified by some {@link QueueItemAuthenticator#authenticate(hudson.model.Queue.Task)}; else {@link #getDefaultAuthenticationOf}
-     * @since 1.560
+     * @return an authentication as specified by some {@link QueueItemAuthenticator#authenticate2(hudson.model.Queue.Task)}; else {@link Task#getDefaultAuthentication2()}
+     * @since 2.266
      */
-    public static @Nonnull Authentication getAuthenticationOf(@Nonnull Task t) {
-        for (QueueItemAuthenticator qia : QueueItemAuthenticatorConfiguration.get().getAuthenticators()) {
-            Authentication a = qia.authenticate(t);
+    public static @NonNull Authentication getAuthenticationOf2(@NonNull Task t) {
+        for (QueueItemAuthenticator qia : QueueItemAuthenticatorProvider.authenticators()) {
+            Authentication a = qia.authenticate2(t);
             if (a != null) {
                 return a;
             }
         }
-        return getDefaultAuthenticationOf(t);
+        return t.getDefaultAuthentication2();
     }
+
+    /**
+     * @deprecated use {@link #getAuthenticationOf2}
+     * @since 1.560
+     */
+    @Deprecated
+    public static @NonNull org.acegisecurity.Authentication getAuthenticationOf(@NonNull Task t) {
+        return org.acegisecurity.Authentication.fromSpring(getAuthenticationOf2(t));
+    }
+
 
 }

@@ -23,20 +23,29 @@
 
 package hudson.org.apache.tools.tar;
 
+import hudson.RestrictedSince;
+import java.io.FilterOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import org.apache.tools.tar.TarBuffer;
 import org.apache.tools.tar.TarConstants;
 import org.apache.tools.tar.TarEntry;
-
-import java.io.FilterOutputStream;
-import java.io.OutputStream;
-import java.io.IOException;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * The TarOutputStream writes a UNIX tar archive as an OutputStream.
  * Methods are provided to put entries, and then write their contents
  * by writing to this stream using write().
+ * 
+ * @deprecated Use {@link org.apache.commons.compress.archivers.tar.TarArchiveOutputStream} instead
  *
  */
+@Deprecated
+@Restricted(NoExternalUse.class)
+@RestrictedSince("2.200")
 public class TarOutputStream extends FilterOutputStream {
     /** Fail if a long file name is required in the archive. */
     public static final int LONGFILE_ERROR = 0;
@@ -99,7 +108,7 @@ public class TarOutputStream extends FilterOutputStream {
     /**
      * Set the long file mode.
      * This can be LONGFILE_ERROR(0), LONGFILE_TRUNCATE(1) or LONGFILE_GNU(2).
-     * This specifies the treatment of long file names (names >= TarConstants.NAMELEN).
+     * This specifies the treatment of long file names (names ≥ TarConstants.NAMELEN).
      * Default is LONGFILE_ERROR.
      * @param longFileMode the mode to use
      */
@@ -133,7 +142,7 @@ public class TarOutputStream extends FilterOutputStream {
      */
     public void finish() throws IOException {
         // See Bugzilla 28776 for a discussion on this
-        // http://issues.apache.org/bugzilla/show_bug.cgi?id=28776
+        // https://bz.apache.org/bugzilla/show_bug.cgi?id=28776
         this.writeEOFRecord();
         this.writeEOFRecord();
     }
@@ -144,6 +153,7 @@ public class TarOutputStream extends FilterOutputStream {
      * TarBuffer's close().
      * @throws IOException on error
      */
+    @Override
     public void close() throws IOException {
         if (!closed) {
             this.finish();
@@ -183,7 +193,7 @@ public class TarOutputStream extends FilterOutputStream {
                 TarEntry longLinkEntry = new TarEntry(TarConstants.GNU_LONGLINK,
                                                       TarConstants.LF_GNUTYPE_LONGNAME);
 
-                byte[] name = entry.getName().getBytes("UTF-8");
+                byte[] name = entry.getName().getBytes(StandardCharsets.UTF_8);
                 longLinkEntry.setSize(name.length + 1);
                 putNextEntry(longLinkEntry);
                 write(name);
@@ -247,6 +257,7 @@ public class TarOutputStream extends FilterOutputStream {
      * @param b The byte written.
      * @throws IOException on error
      */
+    @Override
     public void write(int b) throws IOException {
         this.oneBuf[0] = (byte) b;
 
@@ -261,6 +272,7 @@ public class TarOutputStream extends FilterOutputStream {
      * @param wBuf The buffer to write to the archive.
      * @throws IOException on error
      */
+    @Override
     public void write(byte[] wBuf) throws IOException {
         this.write(wBuf, 0, wBuf.length);
     }
@@ -279,8 +291,9 @@ public class TarOutputStream extends FilterOutputStream {
      * @param numToWrite The number of bytes to write.
      * @throws IOException on error
      */
+    @Override
     public void write(byte[] wBuf, int wOffset, int numToWrite) throws IOException {
-        if ((this.currBytes + numToWrite) > this.currSize) {
+        if (this.currBytes + numToWrite > this.currSize) {
             throw new IOException("request to write '" + numToWrite
                                   + "' bytes exceeds size in header of '"
                                   + this.currSize + "' bytes for entry '"
@@ -296,7 +309,7 @@ public class TarOutputStream extends FilterOutputStream {
         }
 
         if (this.assemLen > 0) {
-            if ((this.assemLen + numToWrite) >= this.recordBuf.length) {
+            if (this.assemLen + numToWrite >= this.recordBuf.length) {
                 int aLen = this.recordBuf.length - this.assemLen;
 
                 System.arraycopy(this.assemBuf, 0, this.recordBuf, 0,
@@ -349,12 +362,8 @@ public class TarOutputStream extends FilterOutputStream {
      * An EOF record consists of a record of all zeros.
      */
     private void writeEOFRecord() throws IOException {
-        for (int i = 0; i < this.recordBuf.length; ++i) {
-            this.recordBuf[i] = 0;
-        }
+        Arrays.fill(this.recordBuf, (byte) 0);
 
         this.buffer.writeRecord(this.recordBuf);
     }
 }
-
-

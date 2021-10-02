@@ -23,35 +23,36 @@
  */
 package hudson.util;
 
-import hudson.init.Initializer;
-import jenkins.model.Jenkins;
-import hudson.triggers.SafeTimerTask;
-import jenkins.util.Timer;
-import org.apache.commons.io.FileUtils;
-import org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
-
-import javax.servlet.ServletException;
-import javax.servlet.ServletContext;
-
-import static hudson.init.InitMilestone.JOB_LOADED;
+import static hudson.init.InitMilestone.JOB_CONFIG_ADAPTED;
 import static javax.servlet.http.HttpServletResponse.SC_INTERNAL_SERVER_ERROR;
+
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import hudson.init.Initializer;
+import hudson.triggers.SafeTimerTask;
 import java.io.File;
 import java.io.IOException;
-import java.util.Random;
-import java.util.concurrent.TimeUnit;
-import java.util.logging.Logger;
-import java.util.logging.Level;
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.Method;
+import java.nio.charset.Charset;
+import java.util.Random;
+import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import javax.servlet.ServletContext;
+import javax.servlet.ServletException;
+import jenkins.model.Jenkins;
+import jenkins.util.Timer;
+import org.apache.commons.io.FileUtils;
+import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerResponse;
+import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
- * Makes sure that no other Hudson uses our <tt>JENKINS_HOME</tt> directory,
+ * Makes sure that no other Hudson uses our {@code JENKINS_HOME} directory,
  * to forestall the problem of running multiple instances of Hudson that point to the same data directory.
  *
  * <p>
- * This set up error occasionally happens especialy when the user is trying to reassign the context path of the app,
+ * This set up error occasionally happens especially when the user is trying to reassign the context path of the app,
  * and it results in a hard-to-diagnose error, so we actively check this.
  *
  * <p>
@@ -62,11 +63,12 @@ import java.lang.reflect.Method;
  *
  * <p>
  * More traditional way of doing this is to use a lock file with PID in it, but unfortunately in Java,
- * there's no reliabe way to obtain PID.
+ * there's no reliable way to obtain PID.
  *
  * @author Kohsuke Kawaguchi
  * @since 1.178
  */
+@SuppressFBWarnings(value="PREDICTABLE_RANDOM", justification = "The random is just used for load distribution.")
 public class DoubleLaunchChecker {
     /**
      * The timestamp of the owner file when we updated it for the last time.
@@ -91,7 +93,7 @@ public class DoubleLaunchChecker {
     private String collidingId;
 
     public DoubleLaunchChecker() {
-        home = Jenkins.getInstance().getRootDir();
+        home = Jenkins.get().getRootDir();
     }
 
     protected void execute() {
@@ -100,19 +102,19 @@ public class DoubleLaunchChecker {
         long t = timestampFile.lastModified();
         if(t!=0 && lastWriteTime!=0 && t!=lastWriteTime && !ignore) {
             try {
-                collidingId = FileUtils.readFileToString(timestampFile);
+                collidingId = FileUtils.readFileToString(timestampFile, Charset.defaultCharset());
             } catch (IOException e) {
                 LOGGER.log(Level.SEVERE, "Failed to read collision file", e);
             }
             // we noticed that someone else have updated this file.
             // switch GUI to display this error.
-            Jenkins.getInstance().servletContext.setAttribute("app",this);
+            Jenkins.get().servletContext.setAttribute("app",this);
             LOGGER.severe("Collision detected. timestamp="+t+", expected="+lastWriteTime);
             // we need to continue updating this file, so that the other Hudson would notice the problem, too.
         }
 
         try {
-            FileUtils.writeStringToFile(timestampFile, getId());
+            FileUtils.writeStringToFile(timestampFile, getId(), Charset.defaultCharset());
             lastWriteTime = timestampFile.lastModified();
         } catch (IOException e) {
             // if failed to write, err on the safe side and assume things are OK.
@@ -126,13 +128,15 @@ public class DoubleLaunchChecker {
      * Figures out a string that identifies this instance of Hudson.
      */
     public String getId() {
-        Jenkins h = Jenkins.getInstance();
+        Jenkins h = Jenkins.get();
 
         // in servlet 2.5, we can get the context path
         String contextPath="";
         try {
             Method m = ServletContext.class.getMethod("getContextPath");
-            contextPath=" contextPath=\""+m.invoke(h.servletContext)+"\"";
+            contextPath = " contextPath=\"" + m.invoke(h.servletContext) + "\"";
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
             // maybe running with Servlet 2.4
         }
@@ -153,13 +157,14 @@ public class DoubleLaunchChecker {
 
         Timer.get()
             .schedule(new SafeTimerTask() {
+                @Override
                 protected void doRun() {
                     execute();
                 }
             }, (random.nextInt(30) + 60) * MINUTE, TimeUnit.MILLISECONDS);
     }
 
-    @Initializer(after= JOB_LOADED)
+    @Initializer(after= JOB_CONFIG_ADAPTED)
     public static void init() {
         new DoubleLaunchChecker().schedule();
     }
@@ -175,9 +180,10 @@ public class DoubleLaunchChecker {
     /**
      * Ignore the problem and go back to using Hudson.
      */
+    @RequirePOST
     public void doIgnore(StaplerRequest req, StaplerResponse rsp) throws IOException {
         ignore = true;
-        Jenkins.getInstance().servletContext.setAttribute("app", Jenkins.getInstance());
+        Jenkins.get().servletContext.setAttribute("app", Jenkins.get());
         rsp.sendRedirect2(req.getContextPath()+'/');
     }
 

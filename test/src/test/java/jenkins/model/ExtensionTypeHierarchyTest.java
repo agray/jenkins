@@ -1,18 +1,27 @@
 package jenkins.model;
 
-import hudson.ExtensionPoint;
-import org.jvnet.hudson.test.HudsonTestCase;
-import org.jvnet.hudson.test.TestExtension;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
 
+import hudson.ExtensionPoint;
 import java.util.Arrays;
 import java.util.Comparator;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.TestExtension;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class ExtensionTypeHierarchyTest extends HudsonTestCase {
-    public static interface Animal extends ExtensionPoint {}
-    public static interface White extends ExtensionPoint {}
+public class ExtensionTypeHierarchyTest {
+
+    @Rule
+    public JenkinsRule j = new JenkinsRule();
+
+    public interface Animal extends ExtensionPoint {}
+    public interface White extends ExtensionPoint {}
 
     @TestExtension
     public static class Swan implements Animal, White {}
@@ -22,17 +31,18 @@ public class ExtensionTypeHierarchyTest extends HudsonTestCase {
     /**
      * Swan is both white and animal, so a single swan instance gets listed to both.
      */
-    public void testSameExtensionCanImplementMultipleExtensionPoints() {
-        Animal[] animals = sort(jenkins.getExtensionList(Animal.class).toArray(new Animal[2]));
+    @Test
+    public void sameExtensionCanImplementMultipleExtensionPoints() {
+        Animal[] animals = sort(j.jenkins.getExtensionList(Animal.class).toArray(new Animal[2]));
         assertTrue(animals[0] instanceof Crow);
         assertTrue(animals[1] instanceof Swan);
         assertEquals(2, animals.length);
 
-        White[] whites = sort(jenkins.getExtensionList(White.class).toArray(new White[1]));
+        White[] whites = sort(j.jenkins.getExtensionList(White.class).toArray(new White[1]));
         assertTrue(whites[0] instanceof Swan);
         assertEquals(1, whites.length);
 
-        assertSame(animals[1],whites[0]);
+        assertSame(animals[1], whites[0]);
     }
 
     /**
@@ -40,6 +50,7 @@ public class ExtensionTypeHierarchyTest extends HudsonTestCase {
      */
     private <T> T[] sort(T[] a) {
         Arrays.sort(a,new Comparator<T>() {
+            @Override
             public int compare(T o1, T o2) {
                 return o1.getClass().getName().compareTo(o2.getClass().getName());
             }

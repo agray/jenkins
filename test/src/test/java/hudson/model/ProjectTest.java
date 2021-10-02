@@ -23,70 +23,85 @@
  */
 package hudson.model;
 
-import hudson.model.queue.QueueTaskFuture;
-import hudson.security.AccessDeniedException2;
-import org.acegisecurity.context.SecurityContextHolder;
-import hudson.security.HudsonPrivateSecurityRealm;
-import hudson.security.GlobalMatrixAuthorizationStrategy;
-import java.util.Collections;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
-import org.jvnet.hudson.reactor.ReactorException;
-import org.jvnet.hudson.test.FakeChangeLogSCM;
-import hudson.scm.SCMRevisionState;
-import hudson.scm.PollingResult;
-import hudson.Launcher;
-import hudson.Launcher.RemoteLauncher;
-import hudson.scm.NullSCM;
-import hudson.scm.SCM;
-import hudson.model.queue.SubTaskContributor;
-import hudson.model.queue.AbstractSubTask;
-import hudson.model.Queue.Executable;
-import hudson.model.Queue.Task;
-import hudson.model.queue.SubTask;
-import hudson.model.AbstractProject.BecauseOfUpstreamBuildInProgress;
-import hudson.model.AbstractProject.BecauseOfDownstreamBuildInProgress;
-import jenkins.model.Jenkins;
-import hudson.model.AbstractProject.BecauseOfBuildInProgress;
 import antlr.ANTLRException;
-import hudson.triggers.SCMTrigger;
-import hudson.model.Cause.LegacyCodeCause;
+import com.gargoylesoftware.htmlunit.HttpMethod;
+import com.gargoylesoftware.htmlunit.WebRequest;
 import com.gargoylesoftware.htmlunit.html.HtmlElement;
 import com.gargoylesoftware.htmlunit.html.HtmlForm;
 import com.gargoylesoftware.htmlunit.html.HtmlPage;
-import java.io.Serializable;
-import jenkins.scm.DefaultSCMCheckoutStrategyImpl;
-import jenkins.scm.SCMCheckoutStrategy;
-import java.io.File;
-import hudson.FilePath;
-import hudson.slaves.EnvironmentVariablesNodeProperty;
+import com.gargoylesoftware.htmlunit.javascript.host.event.Event;
 import hudson.EnvVars;
+import hudson.FilePath;
+import hudson.Functions;
+import hudson.Launcher;
+import hudson.Launcher.RemoteLauncher;
+import hudson.Util;
+import hudson.model.AbstractProject.BecauseOfDownstreamBuildInProgress;
+import hudson.model.AbstractProject.BecauseOfUpstreamBuildInProgress;
+import hudson.model.Cause.UserIdCause;
+import hudson.model.Queue.Executable;
+import hudson.model.Queue.Task;
 import hudson.model.labels.LabelAtom;
+import hudson.model.queue.QueueTaskFuture;
+import hudson.model.queue.SubTask;
+import hudson.model.queue.SubTaskContributor;
+import hudson.scm.NullSCM;
+import hudson.scm.PollingResult;
+import hudson.scm.SCM;
+import hudson.scm.SCMDescriptor;
+import hudson.scm.SCMRevisionState;
+import hudson.security.ACL;
+import hudson.security.ACLContext;
+import hudson.security.AccessDeniedException3;
+import hudson.security.GlobalMatrixAuthorizationStrategy;
+import hudson.security.HudsonPrivateSecurityRealm;
 import hudson.slaves.Cloud;
 import hudson.slaves.DumbSlave;
+import hudson.slaves.EnvironmentVariablesNodeProperty;
 import hudson.slaves.NodeProvisioner;
-import hudson.tasks.Shell;
-import org.jvnet.hudson.test.TestExtension;
-import java.util.List;
-import java.util.ArrayList;
-import java.io.IOException;
-import java.nio.charset.Charset;
-import java.util.Collection;
-import org.junit.Rule;
-import org.junit.Test;
-import org.jvnet.hudson.test.JenkinsRule;
-import static org.junit.Assert.*;
-import hudson.tasks.Fingerprinter;
 import hudson.tasks.ArtifactArchiver;
+import hudson.tasks.BatchFile;
 import hudson.tasks.BuildTrigger;
+import hudson.tasks.Fingerprinter;
+import hudson.tasks.Shell;
+import hudson.triggers.SCMTrigger;
+import java.io.File;
+import java.io.IOException;
+import java.io.Serializable;
+import java.net.URL;
+import java.nio.charset.Charset;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
-
+import jenkins.model.BlockedBecauseOfBuildInProgress;
+import jenkins.model.Jenkins;
+import jenkins.model.WorkspaceWriter;
+import jenkins.scm.DefaultSCMCheckoutStrategyImpl;
+import jenkins.scm.SCMCheckoutStrategy;
 import org.junit.Ignore;
-import org.jvnet.hudson.test.Bug;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.reactor.ReactorException;
+import org.jvnet.hudson.test.FakeChangeLogSCM;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.TestBuilder;
+import org.jvnet.hudson.test.TestExtension;
 
 /**
  *
@@ -109,11 +124,11 @@ public class ProjectTest {
         j.jenkins.reload();
         assertEquals("All persistent data should be saved.", "description", p.description);
         assertEquals("All persistent data should be saved.", 5, p.nextBuildNumber);
-        assertEquals("All persistent data should be saved", true, p.disabled);
+        assertTrue("All persistent data should be saved", p.disabled);
     }
     
     @Test
-    public void testOnCreateFromScratch() throws IOException, Exception{
+    public void testOnCreateFromScratch() throws Exception{
         FreeStyleProject p = j.createFreeStyleProject("project");
         j.buildAndAssertSuccess(p);
         p.removeRun(p.getLastBuild());
@@ -125,15 +140,15 @@ public class ProjectTest {
     }
     
     @Test
-    public void testOnLoad() throws IOException, Exception{
+    public void testOnLoad() throws Exception{
         FreeStyleProject p = j.createFreeStyleProject("project");
         j.buildAndAssertSuccess(p);
         p.removeRun(p.getLastBuild());
         createAction = true;
         p.onLoad(j.jenkins, "project");
-        assertTrue("Project should have a build.", p.getLastBuild()!=null);
-        assertTrue("Project should have a scm.", p.getScm()!=null);
-        assertTrue("Project should have Transient Action TransientAction.", p.getAction(TransientAction.class)!=null);
+        assertNotNull("Project should have a build.", p.getLastBuild());
+        assertNotNull("Project should have a scm.", p.getScm());
+        assertNotNull("Project should have Transient Action TransientAction.", p.getAction(TransientAction.class));
         createAction = false;
     }
     
@@ -148,7 +163,7 @@ public class ProjectTest {
     }
     
     @Test
-    public void testPerformDelete() throws IOException, Exception{
+    public void testPerformDelete() throws Exception{
         FreeStyleProject p = j.createFreeStyleProject("project");
         p.performDelete();
         assertFalse("Project should be deleted from disk.", p.getConfigFile().exists());
@@ -186,7 +201,8 @@ public class ProjectTest {
         getFilePath = true;
         assertNotNull("Project should have any workspace because WorkspaceBrowser find some.", p.getSomeWorkspace());
         getFilePath = false;
-        p.getBuildersList().add(new Shell("echo ahoj > some.log"));
+        String cmd = "echo ahoj > some.log";
+        p.getBuildersList().add(Functions.isWindows() ? new BatchFile(cmd) : new Shell(cmd));
         j.buildAndAssertSuccess(p);
         assertNotNull("Project should has any workspace.", p.getSomeWorkspace());
     }
@@ -194,12 +210,26 @@ public class ProjectTest {
     @Test
     public void testGetSomeBuildWithWorkspace() throws Exception{
         FreeStyleProject p = j.createFreeStyleProject("project");
-        p.getBuildersList().add(new Shell("echo ahoj > some.log"));
+        String cmd = "echo ahoj > some.log";
+        p.getBuildersList().add(Functions.isWindows() ? new BatchFile(cmd) : new Shell(cmd));
         assertNull("Project which has never run should not have any build with workspace.", p.getSomeBuildWithWorkspace());
         j.buildAndAssertSuccess(p);
         assertEquals("Last build should have workspace.", p.getLastBuild(), p.getSomeBuildWithWorkspace());
         p.getLastBuild().delete();
         assertNull("Project should not have build with some workspace.", p.getSomeBuildWithWorkspace());
+    }
+
+    @Issue("JENKINS-10450")
+    @Test public void workspaceBrowsing() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject("project");
+        String cmd = "echo ahoj > some.log";
+        p.getBuildersList().add(Functions.isWindows() ? new BatchFile(cmd) : new Shell(cmd));
+        j.buildAndAssertSuccess(p);
+        JenkinsRule.WebClient wc = j.createWebClient();
+        wc.goTo("job/project/ws/some.log", "text/plain");
+        wc.assertFails("job/project/ws/other.log", 404);
+        p.doDoWipeOutWorkspace();
+        wc.assertFails("job/project/ws/some.log", 404);
     }
     
     @Test
@@ -209,7 +239,7 @@ public class ProjectTest {
         j.jenkins.setQuietPeriod(0);
         assertEquals("Quiet period is not set so it should be the same as global quiet period.", 0, p.getQuietPeriod());
         p.setQuietPeriod(10);
-        assertEquals("Quiet period was set.",p.getQuietPeriod(),10);
+        assertEquals("Quiet period was set.", 10, p.getQuietPeriod());
     }
     
     @Test
@@ -230,7 +260,8 @@ public class ProjectTest {
         assertEquals("Scm retry count should be the same as global scm retry count.", 6, p.getScmCheckoutRetryCount());
         HtmlForm form = j.createWebClient().goTo(p.getUrl() + "/configure").getFormByName("config");
         ((HtmlElement)form.getByXPath("//div[@class='advancedLink']//button").get(0)).click();
-        form.getInputByName("hasCustomScmCheckoutRetryCount").click();
+        // required due to the new default behavior of click
+        form.getInputByName("hasCustomScmCheckoutRetryCount").click(new Event(), false, false, false, true);
         form.getInputByName("scmCheckoutRetryCount").setValueAttribute("7");
         j.submit(form);
         assertEquals("Scm retry count was set.", 7, p.getScmCheckoutRetryCount());
@@ -277,7 +308,7 @@ public class ProjectTest {
     public void testScheduleBuild2() throws IOException, InterruptedException{
         FreeStyleProject p = j.createFreeStyleProject("project");
         p.setAssignedLabel(j.jenkins.getLabel("nonExist"));
-        p.scheduleBuild(0, new LegacyCodeCause(), new Action[0]);
+        p.scheduleBuild(0, new UserIdCause());
         assertNotNull("Project should be in queue.", Queue.getInstance().getItem(p));
         p.setAssignedLabel(null);
         int count = 0;
@@ -302,7 +333,7 @@ public class ProjectTest {
     }
     
     @Test
-    public void testSaveAfterSet() throws Exception, ReactorException {
+    public void testSaveAfterSet() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject("project");
         p.setScm(new NullSCM());
         p.setScmCheckoutStrategy(new SCMCheckoutStrategyImpl());
@@ -318,7 +349,7 @@ public class ProjectTest {
         assertTrue("Project did not save scm checkout strategy.", p.getScmCheckoutStrategy() instanceof SCMCheckoutStrategyImpl);
         assertEquals("Project did not save quiet period.", 15, p.getQuietPeriod());
         assertTrue("Project did not save block if downstream is building.", p.blockBuildWhenDownstreamBuilding());
-        assertTrue("Project did not save block if upstream is buildidng.", p.blockBuildWhenUpstreamBuilding());
+        assertTrue("Project did not save block if upstream is building.", p.blockBuildWhenUpstreamBuilding());
         assertNotNull("Project did not save jdk", p.getJDK());
         assertEquals("Project did not save custom workspace.", "/some/path", p.getCustomWorkspace());
     }
@@ -340,16 +371,16 @@ public class ProjectTest {
     @Test
     public void testGetCauseOfBlockage() throws Exception {
         FreeStyleProject p = j.createFreeStyleProject("project");
-        p.getBuildersList().add(new Shell("sleep 10"));
+        p.getBuildersList().add(Functions.isWindows() ? new BatchFile("ping -n 10 127.0.0.1 >nul") : new Shell("sleep 10"));
         QueueTaskFuture<FreeStyleBuild> b1 = waitForStart(p);
-        assertInstanceOf("Build can not start because previous build has not finished: " + p.getCauseOfBlockage(), p.getCauseOfBlockage(), BecauseOfBuildInProgress.class);
+        assertInstanceOf("Build can not start because previous build has not finished: " + p.getCauseOfBlockage(), p.getCauseOfBlockage(), BlockedBecauseOfBuildInProgress.class);
         p.getLastBuild().getExecutor().interrupt();
         b1.get();   // wait for it to finish
 
         FreeStyleProject downstream = j.createFreeStyleProject("project-downstream");
-        downstream.getBuildersList().add(new Shell("sleep 10"));
+        downstream.getBuildersList().add(Functions.isWindows() ? new BatchFile("ping -n 10 127.0.0.1 >nul") : new Shell("sleep 10"));
         p.getPublishersList().add(new BuildTrigger(Collections.singleton(downstream), Result.SUCCESS));
-        Jenkins.getInstance().rebuildDependencyGraph();
+        Jenkins.get().rebuildDependencyGraph();
         p.setBlockBuildWhenDownstreamBuilding(true);
         QueueTaskFuture<FreeStyleBuild> b2 = waitForStart(downstream);
         assertInstanceOf("Build can not start because build of downstream project has not finished.", p.getCauseOfBlockage(), BecauseOfDownstreamBuildInProgress.class);
@@ -413,14 +444,16 @@ public class ProjectTest {
     }
     
     @Test
-    public void testCheckout() throws IOException, Exception{
+    public void testCheckout() throws Exception{
         SCM scm = new NullSCM();
         FreeStyleProject p = j.createFreeStyleProject("project");
         Slave slave = j.createOnlineSlave();
         AbstractBuild build = p.createExecutable();
-        FilePath path = slave.toComputer().getWorkspaceList().allocate(slave.getWorkspaceFor(p), build).path;
+        FilePath ws = slave.getWorkspaceFor(p);
+        assertNotNull(ws);
+        FilePath path = slave.toComputer().getWorkspaceList().allocate(ws, build).path;
         build.setWorkspace(path);
-        BuildListener listener = new StreamBuildListener(BuildListener.NULL.getLogger(), Charset.defaultCharset());
+        BuildListener listener = new StreamBuildListener(TaskListener.NULL.getLogger(), Charset.defaultCharset());
         assertTrue("Project with null smc should perform checkout without problems.", p.checkout(build, new RemoteLauncher(listener, slave.getChannel(), true), listener, new File(build.getRootDir(),"changelog.xml")));
         p.setScm(scm);
         assertTrue("Project should perform checkout without problems.",p.checkout(build, new RemoteLauncher(listener, slave.getChannel(), true), listener, new File(build.getRootDir(),"changelog.xml")));
@@ -468,32 +501,42 @@ public class ProjectTest {
     
     @Test
     public void testGetRelationship() throws Exception{
-        FreeStyleProject project = j.createFreeStyleProject("project");
-        FreeStyleProject project2 = j.createFreeStyleProject("project2");
-        j.buildAndAssertSuccess(project);
-        j.buildAndAssertSuccess(project);
-        j.buildAndAssertSuccess(project2);
-        assertTrue("Project " + project.getDisplayName()  + " should not have any relationship with " + project2.getDisplayName(), project.getRelationship(project2).isEmpty());       
-        project.getPublishersList().add(new Fingerprinter("change.log", true));
-        project.getBuildersList().add(new Shell("echo hello > change.log"));
-        project.getPublishersList().add(new ArtifactArchiver("change.log","",true));
-        project2.getPublishersList().add(new Fingerprinter("change.log", false));
-        project2.getBuildersList().add(new Shell("cp " + project.getRootDir().getAbsolutePath() + "/builds/lastSuccessfulBuild/archive/change.log ."));
-        j.buildAndAssertSuccess(project);
-        j.buildAndAssertSuccess(project2);
-        j.buildAndAssertSuccess(project);
-        j.buildAndAssertSuccess(project2);
-        project.getBuildersList().add(new Shell("echo helloWorld > change.log"));
-        j.buildAndAssertSuccess(project);
-        j.buildAndAssertSuccess(project2);
-        Map<Integer,Fingerprint.RangeSet> ralationship = project.getRelationship(project2);
-        assertFalse("Project " + project.getDisplayName() + " should have relationship with " + project2.getDisplayName(), ralationship.isEmpty());      
-        assertTrue("Relationship should contains build 3 of project " + project.getDisplayName(), ralationship.keySet().contains(3));
-        assertFalse("Relationship should not contains build 4 of project " + project.getDisplayName() + " because previous fingerprinted file was not change since build 3", ralationship.keySet().contains(4));
-        assertEquals("Build 2 of project " + project2.getDisplayName() + " should be the first build which depends on build 3 of project " + project.getDisplayName(), 2, ralationship.get(3).min());
-        assertEquals("Build 3 of project " + project2.getDisplayName() + " should be the last build which depends on build 3 of project " + project.getDisplayName(), 3, ralationship.get(3).max()-1);
-        assertEquals("Build 4 of project " + project2.getDisplayName() + " should depend only on build 5 of project " + project.getDisplayName(), 4, ralationship.get(5).min());
-        assertEquals("Build 4 of project " + project2.getDisplayName() + " should depend only on build 5 of project " + project.getDisplayName(), 4, ralationship.get(5).max()-1);
+        final FreeStyleProject upstream = j.createFreeStyleProject("upstream");
+        FreeStyleProject downstream = j.createFreeStyleProject("downstream");
+        j.buildAndAssertSuccess(upstream);
+        j.buildAndAssertSuccess(upstream);
+        j.buildAndAssertSuccess(downstream);
+        assertTrue("Project upstream should not have any relationship with downstream", upstream.getRelationship(downstream).isEmpty());
+
+        upstream.getPublishersList().add(new Fingerprinter("change.log", true));
+        upstream.getBuildersList().add(new WorkspaceWriter("change.log", "hello"));
+        upstream.getPublishersList().add(new ArtifactArchiver("change.log"));
+        downstream.getPublishersList().add(new Fingerprinter("change.log", false));
+        downstream.getBuildersList().add(new TestBuilder() {
+            @Override public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) throws InterruptedException, IOException {
+                for (Run<?, ?>.Artifact a: upstream.getLastBuild().getArtifacts()) {
+                    Util.copyFile(a.getFile(), new File(build.getWorkspace().child(a.getFileName()).getRemote()));
+                }
+                return true;
+            }
+        });
+
+        j.buildAndAssertSuccess(upstream);
+        j.buildAndAssertSuccess(downstream);
+        j.buildAndAssertSuccess(upstream);
+        j.buildAndAssertSuccess(downstream);
+        upstream.getBuildersList().add(new WorkspaceWriter("change.log", "helloWorld"));
+        j.buildAndAssertSuccess(upstream);
+        j.buildAndAssertSuccess(downstream);
+
+        Map<Integer,Fingerprint.RangeSet> relationship = upstream.getRelationship(downstream);
+        assertFalse("Project upstream should have relationship with downstream", relationship.isEmpty());
+        assertTrue("Relationship should contain upstream #3", relationship.containsKey(3));
+        assertFalse("Relationship should not contain upstream #4 because previous fingerprinted file was not changed since #3", relationship.containsKey(4));
+        assertEquals("downstream #2 should be the first build which depends on upstream #3", 2, relationship.get(3).min());
+        assertEquals("downstream #3 should be the last build which depends on upstream #3", 3, relationship.get(3).max()-1);
+        assertEquals("downstream #4 should depend only on upstream #5", 4, relationship.get(5).min());
+        assertEquals("downstream #4 should depend only on upstream #5", 4, relationship.get(5).max()-1);
     }
     
     @Test
@@ -505,16 +548,9 @@ public class ProjectTest {
         HudsonPrivateSecurityRealm realm = new HudsonPrivateSecurityRealm(false);
         j.jenkins.setSecurityRealm(realm); 
         User user = realm.createAccount("John Smith", "password");
-        SecurityContextHolder.getContext().setAuthentication(user.impersonate());
-        try{
-            project.doCancelQueue(null, null);
-            fail("User should not have permission to build project");
+        try (ACLContext as = ACL.as(user)) {
+            assertThrows("User should not have permission to build project", AccessDeniedException3.class, () -> project.doCancelQueue(null, null));
         }
-        catch(Exception e){
-            if(!(e.getClass().isAssignableFrom(AccessDeniedException2.class))){
-               fail("AccessDeniedException should be thrown.");
-            }
-        } 
     }
     
     @Test
@@ -523,23 +559,21 @@ public class ProjectTest {
         GlobalMatrixAuthorizationStrategy auth = new GlobalMatrixAuthorizationStrategy();   
         j.jenkins.setAuthorizationStrategy(auth);
         j.jenkins.setCrumbIssuer(null);
-        HudsonPrivateSecurityRealm realm = new HudsonPrivateSecurityRealm(false);
-        j.jenkins.setSecurityRealm(realm); 
-        User user = realm.createAccount("John Smith", "password");
-        SecurityContextHolder.getContext().setAuthentication(user.impersonate()); 
-        try{
-            project.doDoDelete(null, null);
-            fail("User should not have permission to build project");
+        j.jenkins.setSecurityRealm(j.createDummySecurityRealm());
+        User user = User.getById("john", true);
+        try (ACLContext as = ACL.as(user)) {
+            assertThrows("User should not have permission to build project", AccessDeniedException3.class, () -> project.doDoDelete(null, null));
         }
-        catch(Exception e){
-            if(!(e.getClass().isAssignableFrom(AccessDeniedException2.class))){
-               fail("AccessDeniedException should be thrown.");
-            }
-        } 
         auth.add(Jenkins.READ, user.getId());
-        auth.add(Job.READ, user.getId());
-        auth.add(Job.DELETE, user.getId());
-        List<HtmlForm> forms = j.createWebClient().login(user.getId(), "password").goTo(project.getUrl() + "delete").getForms();
+        auth.add(Item.READ, user.getId());
+        auth.add(Item.DELETE, user.getId());
+
+        // use Basic to speedup the test, normally it's pure UI testing
+        JenkinsRule.WebClient wc = j.createWebClient();
+        wc.withBasicCredentials(user.getId());
+        HtmlPage p = wc.goTo(project.getUrl() + "delete");
+
+        List<HtmlForm> forms = p.getForms();
         for(HtmlForm form:forms){
             if("doDelete".equals(form.getAttribute("action"))){
                 j.submit(form);
@@ -558,25 +592,25 @@ public class ProjectTest {
         HudsonPrivateSecurityRealm realm = new HudsonPrivateSecurityRealm(false);
         j.jenkins.setSecurityRealm(realm); 
         User user = realm.createAccount("John Smith", "password");
-        SecurityContextHolder.getContext().setAuthentication(user.impersonate()); 
-        try{
-            project.doDoWipeOutWorkspace();
-            fail("User should not have permission to build project");
+        try (ACLContext as = ACL.as(user)) {
+            assertThrows("User should not have permission to build project", AccessDeniedException3.class, project::doDoWipeOutWorkspace);
         }
-        catch(Exception e){
-            if(!(e.getClass().isAssignableFrom(AccessDeniedException2.class))){
-               fail("AccessDeniedException should be thrown.");
-            }
-        } 
-        auth.add(Job.READ, user.getId());
-        auth.add(Job.BUILD, user.getId());
-        auth.add(Job.WIPEOUT, user.getId());
+        auth.add(Item.READ, user.getId());
+        auth.add(Item.BUILD, user.getId());
+        auth.add(Item.WIPEOUT, user.getId());
         auth.add(Jenkins.READ, user.getId());
         Slave slave = j.createOnlineSlave();
         project.setAssignedLabel(slave.getSelfLabel());
-        project.getBuildersList().add(new Shell("echo hello > change.log"));
+        String cmd = "echo hello > change.log";
+        project.getBuildersList().add(Functions.isWindows()? new BatchFile(cmd) : new Shell(cmd));
         j.buildAndAssertSuccess(project);
-        HtmlPage page = j.createWebClient().login(user.getId(), "password").goTo(project.getUrl() + "doWipeOutWorkspace");
+
+        JenkinsRule.WebClient wc = j.createWebClient();
+        wc.withBasicCredentials(user.getId(), "password");
+        WebRequest request = new WebRequest(new URL(wc.getContextPath() + project.getUrl() + "doWipeOutWorkspace"), HttpMethod.POST);
+        HtmlPage p = wc.getPage(request);
+        assertEquals(200, p.getWebResponse().getStatusCode());
+
         Thread.sleep(500);
         assertFalse("Workspace should not exist.", project.getSomeWorkspace().exists());
     }
@@ -590,20 +624,18 @@ public class ProjectTest {
         HudsonPrivateSecurityRealm realm = new HudsonPrivateSecurityRealm(false);
         j.jenkins.setSecurityRealm(realm); 
         User user = realm.createAccount("John Smith", "password");
-        SecurityContextHolder.getContext().setAuthentication(user.impersonate()); 
-        try{
-            project.doDisable();
-            fail("User should not have permission to build project");
+        try (ACLContext as = ACL.as(user)) {
+            assertThrows("User should not have permission to build project", AccessDeniedException3.class, project::doDisable);
         }
-        catch(Exception e){
-            if(!(e.getClass().isAssignableFrom(AccessDeniedException2.class))){
-               fail("AccessDeniedException should be thrown.");
-            }
-        } 
-        auth.add(Job.READ, user.getId());
-        auth.add(Job.CONFIGURE, user.getId());
+        auth.add(Item.READ, user.getId());
+        auth.add(Item.CONFIGURE, user.getId());
         auth.add(Jenkins.READ, user.getId());
-        List<HtmlForm> forms = j.createWebClient().login(user.getId(), "password").goTo(project.getUrl()).getForms();
+
+        JenkinsRule.WebClient wc = j.createWebClient();
+        wc.withBasicCredentials(user.getId(), "password");
+        HtmlPage p = wc.goTo(project.getUrl());
+
+        List<HtmlForm> forms = p.getForms();
         for(HtmlForm form:forms){
             if("disable".equals(form.getAttribute("action"))){
                 j.submit(form);
@@ -621,21 +653,21 @@ public class ProjectTest {
         HudsonPrivateSecurityRealm realm = new HudsonPrivateSecurityRealm(false);
         j.jenkins.setSecurityRealm(realm);
         User user = realm.createAccount("John Smith", "password");
-        SecurityContextHolder.getContext().setAuthentication(user.impersonate()); 
-        project.disable();
-        try{
-            project.doEnable();
-            fail("User should not have permission to build project");
+        try (ACLContext as = ACL.as(user)) {
+            project.disable();
         }
-        catch(Exception e){
-            if(!(e.getClass().isAssignableFrom(AccessDeniedException2.class))){
-               fail("AccessDeniedException should be thrown.");
-            }
-        } 
-        auth.add(Job.READ, user.getId());
-        auth.add(Job.CONFIGURE, user.getId());
+        try (ACLContext as = ACL.as(user)) {
+            assertThrows("User should not have permission to build project", AccessDeniedException3.class, project::doEnable);
+        }
+        auth.add(Item.READ, user.getId());
+        auth.add(Item.CONFIGURE, user.getId());
         auth.add(Jenkins.READ, user.getId());
-        List<HtmlForm> forms = j.createWebClient().login(user.getId(), "password").goTo(project.getUrl()).getForms();
+
+        JenkinsRule.WebClient wc = j.createWebClient();
+        wc.withBasicCredentials(user.getId(), "password");
+        HtmlPage p = wc.goTo(project.getUrl());
+
+        List<HtmlForm> forms = p.getForms();
         for(HtmlForm form:forms){
             if("enable".equals(form.getAttribute("action"))){
                 j.submit(form);
@@ -646,11 +678,10 @@ public class ProjectTest {
     
     /**
      * Job is un-restricted (no nabel), this is submitted to queue, which spawns an on demand slave
-     * @throws Exception 
      */
     @Test
     public void testJobSubmittedShouldSpawnCloud() throws Exception {
-        /**
+        /*
          * Setup a project with an SCM. Jenkins should have no executors in itself. 
          */
         FreeStyleProject proj = j.createFreeStyleProject("JENKINS-21394-spawn");        
@@ -675,8 +706,7 @@ public class ProjectTest {
     }
     
     /**
-     * Job is restricted, but label can not be provided by any cloud, only normal slaves. Then job will not submit, because no slave is available.
-     * @throws Exception
+     * Job is restricted, but label can not be provided by any cloud, only normal agents. Then job will not submit, because no slave is available.
      */
     @Test
     public void testUnrestrictedJobNoLabelByCloudNoQueue() throws Exception {
@@ -695,12 +725,12 @@ public class ProjectTest {
         j.buildAndAssertSuccess(proj);        
 
         //Now create another slave. And restrict the job to that slave. The slave is offline, leaving the job with no assignable nodes.
-        //We tell our mock SCM to return that it has got changes. But since there are no slaves, we get the desired result. 
+        //We tell our mock SCM to return that it has got changes. But since there are no agents, we get the desired result. 
         Slave s2 = j.createSlave();
         proj.setAssignedLabel(s2.getSelfLabel());
         requiresWorkspaceScm.hasChange = true;
         
-        //Poll (We now should have NO online slaves, this should now return NO_CHANGES.
+        //Poll (We now should have NO online agents, this should now return NO_CHANGES.
         PollingResult pr = proj.poll(j.createTaskListener());
         assertFalse(pr.hasChanges());
         
@@ -710,7 +740,7 @@ public class ProjectTest {
         
         t.new Runner().run();
         
-        /**
+        /*
          * Assert that the log contains the correct message.
          */
         HtmlPage log = j.createWebClient().getPage(proj, "scmPollLog");
@@ -721,7 +751,6 @@ public class ProjectTest {
     
     /**
      * Job is restricted. Label is on slave that can be started in cloud. Job is submitted to queue, which spawns an on demand slave.
-     * @throws Exception 
      */
     @Test
     public void testRestrictedLabelOnSlaveYesQueue() throws Exception {        
@@ -748,7 +777,7 @@ public class ProjectTest {
         assertEquals(1, j.jenkins.getQueue().getItems().length);    
     }
 
-    @Bug(22750)
+    @Issue("JENKINS-22750")
     @Test
     public void testMasterJobPutInQueue() throws Exception {
         FreeStyleProject proj = j.createFreeStyleProject("JENKINS-21394-yes-master-queue");
@@ -779,7 +808,7 @@ public class ProjectTest {
 
         @Override
         public Collection<? extends Action> createFor(AbstractProject target) {
-            List<Action> actions = new ArrayList<Action>();
+            List<Action> actions = new ArrayList<>();
             if(createAction)
                 actions.add(new TransientAction());
             return actions;
@@ -806,6 +835,9 @@ public class ProjectTest {
         @Override
         public boolean requiresWorkspaceForPolling(){
             return true;
+        }
+        @Override public SCMDescriptor<?> getDescriptor() {
+            return new SCMDescriptor<SCM>(null) {};
         }
         
         @Override
@@ -862,7 +894,7 @@ public class ProjectTest {
 
         @Override
         public Collection getSubTasks() {
-            ArrayList<SubTask> list = new ArrayList<SubTask>();
+            ArrayList<SubTask> list = new ArrayList<>();
             list.add(new SubTaskImpl());
             return list;
         }
@@ -875,7 +907,7 @@ public class ProjectTest {
 
         @Override
         public Collection<? extends SubTask> forProject(AbstractProject<?, ?> p) {
-            ArrayList<SubTask> list = new ArrayList<SubTask>();
+            ArrayList<SubTask> list = new ArrayList<>();
             if(createSubTask){
                 list.add(new SubTaskImpl2());
             }
@@ -887,18 +919,18 @@ public class ProjectTest {
         
     }
     
-    public static class SubTaskImpl extends AbstractSubTask{
+    public static class SubTaskImpl implements SubTask{
         
         public String projectName;
 
         @Override
-        public Executable createExecutable() throws IOException {
+        public Executable createExecutable() {
             return null;
         }
 
         @Override
         public Task getOwnerTask() {
-            return (Task) Jenkins.getInstance().getItem(projectName);
+            return (Task) Jenkins.get().getItem(projectName);
         }
 
         @Override
@@ -948,7 +980,7 @@ public class ProjectTest {
 
         @Override
         public Collection<NodeProvisioner.PlannedNode> provision(Label label, int excessWorkload) {
-            List<NodeProvisioner.PlannedNode> r = new ArrayList<NodeProvisioner.PlannedNode>();
+            List<NodeProvisioner.PlannedNode> r = new ArrayList<>();
 
             //Always provision...even if there is no workload.
             while(excessWorkload >= 0) {

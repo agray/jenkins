@@ -24,17 +24,16 @@
 package hudson.model;
 
 import hudson.console.AnnotatedLargeText;
-import org.kohsuke.stapler.framework.io.LargeText;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
-
+import hudson.security.ACL;
+import hudson.security.Permission;
+import java.io.IOException;
+import java.lang.ref.WeakReference;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletResponse;
-import java.lang.ref.WeakReference;
-import java.io.IOException;
-
-import hudson.security.Permission;
-import hudson.security.ACL;
+import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerResponse;
+import org.kohsuke.stapler.framework.io.LargeText;
+import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
  * Partial {@link Action} implementation for those who kick some
@@ -49,7 +48,7 @@ import hudson.security.ACL;
  */
 public abstract class TaskAction extends AbstractModelObject implements Action {
     /**
-     * If non-null, that means either the activitiy is in progress
+     * If non-null, that means either the activity is in progress
      * asynchronously, or it failed unexpectedly and the thread is dead.
      */
     protected transient volatile TaskThread workerThread;
@@ -60,19 +59,26 @@ public abstract class TaskAction extends AbstractModelObject implements Action {
     protected transient WeakReference<AnnotatedLargeText> log;
 
     /**
-     * Gets the permission object that represents the permission to perform this task.
+     * Gets the permission object that represents the permission (against {@link #getACL}) to perform this task.
+     * Generally your implementation of {@link #getIconFileName} should return null if {@code !getACL().hasPermission2(getPermission())}.
      */
     protected abstract Permission getPermission();
 
     /**
-     * Gets the {@link ACL} against which the permissions are checked.
+     * Gets the {@link ACL} against which {@link #getPermission} is checked.
      */
     protected abstract ACL getACL();
+
+    /**
+     * @see #getPermission
+     */
+    @Override public abstract String getIconFileName();
 
     /**
      * @deprecated as of 1.350
      *      Use {@link #obtainLog()}, which returns the same object in a more type-safe signature.
      */
+    @Deprecated
     public LargeText getLog() {
         return obtainLog();
     }
@@ -94,6 +100,7 @@ public abstract class TaskAction extends AbstractModelObject implements Action {
         return l.get();
     }
 
+    @Override
     public String getSearchUrl() {
         return getUrlName();
     }
@@ -129,6 +136,7 @@ public abstract class TaskAction extends AbstractModelObject implements Action {
     /**
      * Clears the error status.
      */
+    @RequirePOST
     public synchronized void doClearError(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
         getACL().checkPermission(getPermission());
 
@@ -137,4 +145,3 @@ public abstract class TaskAction extends AbstractModelObject implements Action {
         rsp.sendRedirect(".");
     }
 }
-

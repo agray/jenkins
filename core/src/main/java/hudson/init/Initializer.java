@@ -23,20 +23,20 @@
  */
 package hudson.init;
 
+import static hudson.init.InitMilestone.COMPLETED;
+import static hudson.init.InitMilestone.STARTED;
+import static java.lang.annotation.ElementType.METHOD;
+import static java.lang.annotation.RetentionPolicy.RUNTIME;
+
+import hudson.Extension;
+import java.lang.annotation.Documented;
+import java.lang.annotation.Retention;
+import java.lang.annotation.Target;
 import org.jvnet.hudson.annotation_indexer.Indexed;
 import org.jvnet.hudson.reactor.Task;
 
-import java.lang.annotation.Documented;
-import static java.lang.annotation.ElementType.METHOD;
-import java.lang.annotation.Retention;
-import static java.lang.annotation.RetentionPolicy.RUNTIME;
-import java.lang.annotation.Target;
-
-import static hudson.init.InitMilestone.STARTED;
-import static hudson.init.InitMilestone.COMPLETED;
-
 /**
- * Placed on static methods to indicate that this method is to be run during the Jenkins start up to perform
+ * Placed on methods to indicate that this method is to be run during the Jenkins start up to perform
  * some sort of initialization tasks.
  *
  * <h3>Example</h3>
@@ -46,6 +46,11 @@ import static hudson.init.InitMilestone.COMPLETED;
        ....
    }
  * </pre>
+ *
+ * <p>
+ * The method in question can be either {@code static} or an instance method. When used with instance
+ * methods, those methods have to be on a class annotated with {@link Extension} and marked as
+ * {@link #after()} {@link InitMilestone#PLUGINS_PREPARED}.
  * 
  * @author Kohsuke Kawaguchi
  */
@@ -59,7 +64,7 @@ public @interface Initializer {
      *
      * <p>
      * This has the identical purpose as {@link #requires()}, but it's separated to allow better type-safety
-     * when using {@link InitMilestone} as a requirement (since enum member definitions need to be constant.)
+     * when using {@link InitMilestone} as a requirement (since enum member definitions need to be constant).
      */
     InitMilestone after() default STARTED;
 
@@ -86,7 +91,7 @@ public @interface Initializer {
     String[] attains() default {};
 
     /**
-     * Key in <tt>Messages.properties</tt> that represents what this task is about. Used for rendering the progress.
+     * Key in {@code Messages.properties} that represents what this task is about. Used for rendering the progress.
      * Defaults to "${short class name}.${method Name}".
      */
     String displayName() default "";

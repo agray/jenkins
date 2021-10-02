@@ -1,10 +1,11 @@
 package hudson.scm;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.FilePath;
+import hudson.Launcher;
 import hudson.model.AbstractProject;
 import hudson.model.TaskListener;
-import hudson.Launcher;
-import hudson.FilePath;
-
 import java.io.Serializable;
 
 /**
@@ -23,13 +24,13 @@ public final class PollingResult implements Serializable {
      * (This comes from either the workspace, or from the remote repository as of the last polling.
      * Can be null.
      */
-    public final SCMRevisionState baseline;
+    public final @CheckForNull SCMRevisionState baseline;
 
     /**
      * Current state of the remote repository. To be passed to the next invocation of the polling method.
      * Can be null.
      */
-    public final SCMRevisionState remote;
+    public final @CheckForNull SCMRevisionState remote;
 
     /**
      * Degree of the change between baseline and remote. Never null.
@@ -39,7 +40,7 @@ public final class PollingResult implements Serializable {
      * the immediate rebuild, and (2) allow SCM to ignore some changes in the repository to implement
      * exclusion feature.
      */
-    public final Change change;
+    public final @NonNull Change change;
 
     /**
      * Degree of changes between the previous state and this state.
@@ -77,14 +78,14 @@ public final class PollingResult implements Serializable {
         INCOMPARABLE
     }
 
-    public PollingResult(SCMRevisionState baseline, SCMRevisionState remote, Change change) {
+    public PollingResult(@CheckForNull SCMRevisionState baseline, @CheckForNull SCMRevisionState remote, @NonNull Change change) {
         if (change==null)   throw new IllegalArgumentException();
         this.baseline = baseline;
         this.remote = remote;
         this.change = change;
     }
 
-    public PollingResult(Change change) {
+    public PollingResult(@NonNull Change change) {
         this(null,null,change);
     }
 

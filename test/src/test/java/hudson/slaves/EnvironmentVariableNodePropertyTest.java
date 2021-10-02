@@ -1,141 +1,158 @@
 package hudson.slaves;
 
+import static org.junit.Assert.assertEquals;
+
+import com.gargoylesoftware.htmlunit.html.HtmlForm;
+import com.gargoylesoftware.htmlunit.html.HtmlPage;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Node;
 import hudson.model.ParametersDefinitionProperty;
 import hudson.model.Result;
 import hudson.model.StringParameterDefinition;
-import hudson.slaves.EnvironmentVariablesNodeProperty.Entry;
-
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Map;
-
-import org.junit.Assert;
+import org.junit.Before;
+import org.junit.ClassRule;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.BuildWatcher;
 import org.jvnet.hudson.test.CaptureEnvironmentBuilder;
-import org.jvnet.hudson.test.HudsonTestCase;
-
-import com.gargoylesoftware.htmlunit.html.HtmlForm;
-import com.gargoylesoftware.htmlunit.html.HtmlPage;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.JenkinsRule.WebClient;
 
 /**
  * This class tests that environment variables from node properties are applied,
- * and that the priority is maintained: parameters > slave node properties >
- * master node properties
+ * and that the priority is maintained: parameters > agent node properties >
+ * global (controller) node properties
+ * TODO(terminology) confirm that the built-in node has node properties separate from global (controller) node properties
  */
-public class EnvironmentVariableNodePropertyTest extends HudsonTestCase {
+public class EnvironmentVariableNodePropertyTest {
 
-	private DumbSlave slave;
+	@ClassRule
+	public static BuildWatcher buildWatcher = new BuildWatcher();
+
+	@Rule
+	public JenkinsRule j = new JenkinsRule();
+
+	private DumbSlave agent;
 	private FreeStyleProject project;
 
 	/**
-	 * Slave properties are available
+	 * Agent properties are available
 	 */
-	public void testSlavePropertyOnSlave() throws Exception {
-		setVariables(slave, new Entry("KEY", "slaveValue"));
-		Map<String, String> envVars = executeBuild(slave);
-		Assert.assertEquals("slaveValue", envVars.get("KEY"));
+	@Test
+	public void testAgentPropertyOnAgent() throws Exception {
+		setVariables(agent, new EnvironmentVariablesNodeProperty.Entry("KEY", "agentValue"));
+		Map<String, String> envVars = executeBuild(agent);
+		assertEquals("agentValue", envVars.get("KEY"));
 	}
 	
 	/**
-	 * Master properties are available
+	 * Built-in node properties are available
 	 */
-	public void testMasterPropertyOnMaster() throws Exception {
-        jenkins.getGlobalNodeProperties().replaceBy(
+	@Test
+	public void testControllerPropertyOnBuiltInNode() throws Exception {
+        j.jenkins.getGlobalNodeProperties().replaceBy(
                 Collections.singleton(new EnvironmentVariablesNodeProperty(
-                        new Entry("KEY", "masterValue"))));
+                        new EnvironmentVariablesNodeProperty.Entry("KEY", "globalValue"))));
 
-		Map<String, String> envVars = executeBuild(jenkins);
+		Map<String, String> envVars = executeBuild(j.jenkins);
 
-		Assert.assertEquals("masterValue", envVars.get("KEY"));
+		assertEquals("globalValue", envVars.get("KEY"));
 	}
 
 	/**
-	 * Both slave and master properties are available, but slave properties have priority
+	 * Both agent and controller properties are available, but agent properties have priority
 	 */
-	public void testSlaveAndMasterPropertyOnSlave() throws Exception {
-        jenkins.getGlobalNodeProperties().replaceBy(
+	@Test
+	public void testAgentAndControllerPropertyOnAgent() throws Exception {
+        j.jenkins.getGlobalNodeProperties().replaceBy(
                 Collections.singleton(new EnvironmentVariablesNodeProperty(
-                        new Entry("KEY", "masterValue"))));
-		setVariables(slave, new Entry("KEY", "slaveValue"));
+                        new EnvironmentVariablesNodeProperty.Entry("KEY", "globalValue"))));
+		setVariables(agent, new EnvironmentVariablesNodeProperty.Entry("KEY", "agentValue"));
 
-		Map<String, String> envVars = executeBuild(slave);
+		Map<String, String> envVars = executeBuild(agent);
 
-		Assert.assertEquals("slaveValue", envVars.get("KEY"));
+		assertEquals("agentValue", envVars.get("KEY"));
 	}
 
 	/**
-	 * Slave and master properties and parameters are available.
-	 * Priority: parameters > slave > master
-	 * @throws Exception
+	 * Agent and controller properties and parameters are available.
+	 * Priority: parameters > agent > controller
 	 */
-	public void testSlaveAndMasterPropertyAndParameterOnSlave()
+	@Test
+	// TODO(terminology) is this correct? This sets a built-in node property, not a global property
+	public void testAgentAndBuiltInNodePropertyAndParameterOnAgent()
 			throws Exception {
 		ParametersDefinitionProperty pdp = new ParametersDefinitionProperty(
 				new StringParameterDefinition("KEY", "parameterValue"));
 		project.addProperty(pdp);
 
-		setVariables(jenkins, new Entry("KEY", "masterValue"));
-		setVariables(slave, new Entry("KEY", "slaveValue"));
+		setVariables(j.jenkins, new EnvironmentVariablesNodeProperty.Entry("KEY", "builtInNodeValue"));
+		setVariables(agent, new EnvironmentVariablesNodeProperty.Entry("KEY", "agentValue"));
 
-		Map<String, String> envVars = executeBuild(slave);
+		Map<String, String> envVars = executeBuild(agent);
 
-		Assert.assertEquals("parameterValue", envVars.get("KEY"));
+		assertEquals("parameterValue", envVars.get("KEY"));
 	}
 	
+	@Test
 	public void testVariableResolving() throws Exception {
-        jenkins.getGlobalNodeProperties().replaceBy(
+        j.jenkins.getGlobalNodeProperties().replaceBy(
                 Collections.singleton(new EnvironmentVariablesNodeProperty(
-                        new Entry("KEY1", "value"), new Entry("KEY2", "$KEY1"))));
-		Map<String,String> envVars = executeBuild(jenkins);
-		Assert.assertEquals("value", envVars.get("KEY1"));
-		Assert.assertEquals("value", envVars.get("KEY2"));
+                        new EnvironmentVariablesNodeProperty.Entry("KEY1", "value"), new EnvironmentVariablesNodeProperty.Entry("KEY2", "$KEY1"))));
+		Map<String,String> envVars = executeBuild(j.jenkins);
+		assertEquals("value", envVars.get("KEY1"));
+		assertEquals("value", envVars.get("KEY2"));
 	}
 	
-	public void testFormRoundTripForMaster() throws Exception {
-        jenkins.getGlobalNodeProperties().replaceBy(
+	@Test
+	public void testFormRoundTripForController() throws Exception {
+        j.jenkins.getGlobalNodeProperties().replaceBy(
                 Collections.singleton(new EnvironmentVariablesNodeProperty(
-                        new Entry("KEY", "value"))));
+                        new EnvironmentVariablesNodeProperty.Entry("KEY", "value"))));
 		
-		WebClient webClient = new WebClient();
-		HtmlPage page = webClient.getPage(jenkins, "configure");
+		WebClient webClient = j.createWebClient();
+		HtmlPage page = webClient.getPage(j.jenkins, "configure");
 		HtmlForm form = page.getFormByName("config");
-		submit(form);
+		j.submit(form);
 		
-		Assert.assertEquals(1, jenkins.getGlobalNodeProperties().toList().size());
+		assertEquals(1, j.jenkins.getGlobalNodeProperties().toList().size());
 		
-		EnvironmentVariablesNodeProperty prop = jenkins.getGlobalNodeProperties().get(EnvironmentVariablesNodeProperty.class);
-		Assert.assertEquals(1, prop.getEnvVars().size());
-		Assert.assertEquals("value", prop.getEnvVars().get("KEY"));
+		EnvironmentVariablesNodeProperty prop = j.jenkins.getGlobalNodeProperties().get(EnvironmentVariablesNodeProperty.class);
+		assertEquals(1, prop.getEnvVars().size());
+		assertEquals("value", prop.getEnvVars().get("KEY"));
 	}
 
-	public void testFormRoundTripForSlave() throws Exception {
-		setVariables(slave, new Entry("KEY", "value"));
-		
-		WebClient webClient = new WebClient();
-		HtmlPage page = webClient.getPage(slave, "configure");
+	@Test
+	public void testFormRoundTripForAgent() throws Exception {
+		setVariables(agent, new EnvironmentVariablesNodeProperty.Entry("KEY", "value"));
+
+		WebClient webClient = j.createWebClient();
+		HtmlPage page = webClient.getPage(agent, "configure");
 		HtmlForm form = page.getFormByName("config");
-		submit(form);
+		j.submit(form);
 		
-		Assert.assertEquals(1, slave.getNodeProperties().toList().size());
+		assertEquals(1, agent.getNodeProperties().toList().size());
 		
-		EnvironmentVariablesNodeProperty prop = slave.getNodeProperties().get(EnvironmentVariablesNodeProperty.class);
-		Assert.assertEquals(1, prop.getEnvVars().size());
-		Assert.assertEquals("value", prop.getEnvVars().get("KEY"));
+		EnvironmentVariablesNodeProperty prop = agent.getNodeProperties().get(EnvironmentVariablesNodeProperty.class);
+		assertEquals(1, prop.getEnvVars().size());
+		assertEquals("value", prop.getEnvVars().get("KEY"));
 	}
 	
 	// //////////////////////// setup //////////////////////////////////////////
 
+	@Before
 	public void setUp() throws Exception {
-		super.setUp();
-		slave = createSlave();
-		project = createFreeStyleProject();
+		agent = j.createSlave();
+		project = j.createFreeStyleProject();
 	}
 
 	// ////////////////////// helper methods /////////////////////////////////
 
-	private void setVariables(Node node, Entry... entries) throws IOException {
+	private void setVariables(Node node, EnvironmentVariablesNodeProperty.Entry... entries) throws IOException {
 		node.getNodeProperties().replaceBy(
 				Collections.singleton(new EnvironmentVariablesNodeProperty(
 						entries)));
@@ -154,8 +171,7 @@ public class EnvironmentVariableNodePropertyTest extends HudsonTestCase {
 		// use a timeout so we don't wait infinitely in case of failure
 		FreeStyleBuild build = project.scheduleBuild2(0).get(/*10, TimeUnit.SECONDS*/);
 		
-		System.out.println(build.getLog());
-		Assert.assertEquals(Result.SUCCESS, build.getResult());
+		assertEquals(Result.SUCCESS, build.getResult());
 
 		return builder.getEnvVars();
 	}

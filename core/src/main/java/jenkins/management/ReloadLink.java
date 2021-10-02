@@ -24,13 +24,17 @@
 
 package jenkins.management;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
 import hudson.model.ManagementLink;
+import hudson.security.Permission;
+import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
 
 /**
  * @author <a href="mailto:nicolas.deloof@gmail.com">Nicolas De Loof</a>
  */
-@Extension(ordinal = Integer.MAX_VALUE - 300)
+@Extension(ordinal = Integer.MAX_VALUE - 300) @Symbol("reload")
 public class ReloadLink extends ManagementLink {
 
     @Override
@@ -38,6 +42,7 @@ public class ReloadLink extends ManagementLink {
         return "refresh.png";
     }
 
+    @Override
     public String getDisplayName() {
         return Messages.ReloadLink_DisplayName();
     }
@@ -55,5 +60,21 @@ public class ReloadLink extends ManagementLink {
     @Override public boolean getRequiresConfirmation() {
         return true;
     }
-    
+
+    @Override
+    public boolean getRequiresPOST() {
+        return true;
+    }
+
+    @NonNull
+    @Override
+    public Permission getRequiredPermission() {
+        return Jenkins.MANAGE;
+    }
+
+    @NonNull
+    @Override
+    public Category getCategory() {
+        return Category.TOOLS;
+    }
 }

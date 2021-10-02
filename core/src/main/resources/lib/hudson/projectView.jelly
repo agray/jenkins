@@ -63,13 +63,14 @@ THE SOFTWARE.
 
     <j:if test="${!empty(jobs) or !empty(attrs.views)}">
       <!-- the caller can inject a tab bar here -->
-      <d:invokeBody/>
+      <div id="projectstatus-tabBar">
+        <d:invokeBody/>
+      </div>
       <!-- project list -->
-      <table id="projectstatus" class="sortable pane bigtable"
-             style="${showViewTabs?'margin-top:0px; border-top: none;':null}">
-        <tr style="border-top: 0px;">
+      <table id="projectstatus" class="sortable pane bigtable stripped-odd ${iconSize == '16x16' ? 'bigtable--compact' : ''}">
+        <tr class="header">
           <j:forEach var="col" items="${columnExtensions}">
-             <st:include page="columnHeader.jelly" it="${col}" />
+            <st:include page="columnHeader.jelly" it="${col}" />
           </j:forEach>
           <th>
             <st:nbsp/>
@@ -84,7 +85,9 @@ THE SOFTWARE.
           <t:projectViewRow jobBaseUrl="${relativeLinkToJob.substring(0, relativeLinkToJob.length() - job.shortUrl.length())}"/>
         </j:forEach>
       </table>
-      <t:iconSize><t:rssBar/></t:iconSize>
+      <div>
+        <t:iconSize><t:rssBar/></t:iconSize>
+      </div>
     </j:if>
   </div>
 </j:jelly>

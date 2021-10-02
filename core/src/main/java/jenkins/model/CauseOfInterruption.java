@@ -23,11 +23,15 @@
  */
 package jenkins.model;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.console.ModelHyperlinkNote;
 import hudson.model.Executor;
 import hudson.model.Result;
 import hudson.model.TaskListener;
 import hudson.model.User;
+import java.io.Serializable;
+import java.util.Collections;
 import org.kohsuke.stapler.export.Exported;
 import org.kohsuke.stapler.export.ExportedBean;
 
@@ -35,7 +39,7 @@ import org.kohsuke.stapler.export.ExportedBean;
  * Records why an {@linkplain Executor#interrupt() executor is interrupted}.
  *
  * <h2>View</h2>
- * <tt>summary.groovy/.jelly</tt> should do one-line HTML rendering to be used while rendering
+ * {@code summary.groovy/.jelly} should do one-line HTML rendering to be used while rendering
  * "build history" widget, next to the blocking build. By default it simply renders
  * {@link #getShortDescription()} text.
  *
@@ -44,13 +48,16 @@ import org.kohsuke.stapler.export.ExportedBean;
  * Two {@link CauseOfInterruption}s that are {@linkplain Object#equals(Object) equal} will get
  * merged together.
  *
+ * <h2>Persistence</h2>
+ * The implementation should be serializable both in Java serialization and XStream.
+ *
  * @author Kohsuke Kawaguchi
  * @since 1.425
  * @see Executor#interrupt(Result, CauseOfInterruption...)
  * @see InterruptedBuildAction
  */
 @ExportedBean
-public abstract class CauseOfInterruption {
+public abstract class CauseOfInterruption implements Serializable {
     /**
      * Human readable description of why the build is cancelled.
      */
@@ -68,28 +75,60 @@ public abstract class CauseOfInterruption {
      * Indicates that the build was interrupted from UI.
      */
     public static final class UserInterruption extends CauseOfInterruption {
+        
+        @NonNull
         private final String user;
 
-        public UserInterruption(User user) {
+        public UserInterruption(@NonNull User user) {
             this.user = user.getId();
         }
 
-        public UserInterruption(String userId) {
+        public UserInterruption(@NonNull String userId) {
             this.user = userId;
         }
 
+        /**
+         * Gets ID of the user, who interrupted the build.
+         * @return User ID
+         * @since 2.31
+         */
+        @NonNull
+        public String getUserId() {
+            return user;
+        }
+        
+        /**
+         * Gets user, who caused the interruption.
+         * @return User instance if it can be located.
+         *         Result of {@link User#getUnknown()} otherwise
+         */
+        @NonNull
         public User getUser() {
-            return User.get(user);
+            final User userInstance = getUserOrNull();
+            return userInstance != null ? userInstance : User.getUnknown();
+        }
+        
+        /**
+         * Gets user, who caused the interruption.
+         * @return User or {@code null} if it has not been found
+         * @since 2.31
+         */
+        @CheckForNull
+        public User getUserOrNull() {
+            return User.get(user, false, Collections.emptyMap());
         }
 
+        @Override
         public String getShortDescription() {
             return Messages.CauseOfInterruption_ShortDescription(user);
         }
 
         @Override
         public void print(TaskListener listener) {
+            final User userInstance = getUser();
             listener.getLogger().println(
-                Messages.CauseOfInterruption_ShortDescription(ModelHyperlinkNote.encodeTo(getUser())));
+                Messages.CauseOfInterruption_ShortDescription(
+                        userInstance != null ? ModelHyperlinkNote.encodeTo(userInstance) : user));
         }
 
         @Override
@@ -103,5 +142,9 @@ public abstract class CauseOfInterruption {
         public int hashCode() {
             return user.hashCode();
         }
+
+        private static final long serialVersionUID = 1L;
     }
+
+    private static final long serialVersionUID = 1L;
 }

@@ -31,14 +31,13 @@ import com.thoughtworks.xstream.converters.collections.AbstractCollectionConvert
 import com.thoughtworks.xstream.io.HierarchicalStreamReader;
 import com.thoughtworks.xstream.io.HierarchicalStreamWriter;
 import com.thoughtworks.xstream.mapper.Mapper;
-
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Arrays;
-
+import jenkins.util.xstream.CriticalXStreamException;
 
 /**
  * {@link List}-like implementation that has copy-on-write semantics.
@@ -57,7 +56,7 @@ public class CopyOnWriteList<E> implements Iterable<E> {
     }
 
     private CopyOnWriteList(List<E> core, boolean noCopy) {
-        this.core = noCopy ? core : new ArrayList<E>(core);
+        this.core = noCopy ? core : new ArrayList<>(core);
     }
 
     public CopyOnWriteList() {
@@ -65,13 +64,13 @@ public class CopyOnWriteList<E> implements Iterable<E> {
     }
 
     public synchronized void add(E e) {
-        List<E> n = new ArrayList<E>(core);
+        List<E> n = new ArrayList<>(core);
         n.add(e);
         core = n;
     }
 
     public synchronized void addAll(Collection<? extends E> items) {
-        List<E> n = new ArrayList<E>(core);
+        List<E> n = new ArrayList<>(core);
         n.addAll(items);
         core = n;
     }
@@ -84,7 +83,7 @@ public class CopyOnWriteList<E> implements Iterable<E> {
      *      in which case there's no change.
      */
     public synchronized boolean remove(E e) {
-        List<E> n = new ArrayList<E>(core);
+        List<E> n = new ArrayList<>(core);
         boolean r = n.remove(e);
         core = n;
         return r;
@@ -93,18 +92,22 @@ public class CopyOnWriteList<E> implements Iterable<E> {
     /**
      * Returns an iterator.
      */
+    @Override
     public Iterator<E> iterator() {
         final Iterator<? extends E> itr = core.iterator();
         return new Iterator<E>() {
             private E last;
+            @Override
             public boolean hasNext() {
                 return itr.hasNext();
             }
 
+            @Override
             public E next() {
                 return last=itr.next();
             }
 
+            @Override
             public void remove() {
                 CopyOnWriteList.this.remove(last);
             }
@@ -133,10 +136,10 @@ public class CopyOnWriteList<E> implements Iterable<E> {
     }
 
     public void clear() {
-        this.core = new ArrayList<E>();
+        this.core = new ArrayList<>();
     }
 
-    public <E> E[] toArray(E[] array) {
+    public <T> T[] toArray(T[] array) {
         return core.toArray(array);
     }
 
@@ -164,6 +167,10 @@ public class CopyOnWriteList<E> implements Iterable<E> {
         return core.contains(item);
     }
 
+    @Override public String toString() {
+        return core.toString();
+    }
+
     /**
      * {@link Converter} implementation for XStream.
      */
@@ -172,15 +179,18 @@ public class CopyOnWriteList<E> implements Iterable<E> {
             super(mapper);
         }
 
+        @Override
         public boolean canConvert(Class type) {
             return type==CopyOnWriteList.class;
         }
 
+        @Override
         public void marshal(Object source, HierarchicalStreamWriter writer, MarshallingContext context) {
             for (Object o : (CopyOnWriteList) source)
                 writeItem(o, context, writer);
         }
 
+        @Override
         @SuppressWarnings("unchecked")
         public CopyOnWriteList unmarshal(HierarchicalStreamReader reader, UnmarshallingContext context) {
             // read the items from xml into a list
@@ -190,9 +200,9 @@ public class CopyOnWriteList<E> implements Iterable<E> {
                 try {
                     Object item = readItem(reader, context, items);
                     items.add(item);
-                } catch (XStreamException e) {
-                    RobustReflectionConverter.addErrorInContext(context, e);
-                } catch (LinkageError e) {
+                } catch (CriticalXStreamException e) {
+                    throw e;
+                } catch (XStreamException | LinkageError e) {
                     RobustReflectionConverter.addErrorInContext(context, e);
                 }
                 reader.moveUp();

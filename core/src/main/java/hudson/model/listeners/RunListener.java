@@ -23,11 +23,13 @@
  */
 package hudson.model.listeners;
 
-import hudson.ExtensionPoint;
-import hudson.ExtensionListView;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
 import hudson.ExtensionList;
+import hudson.ExtensionListView;
+import hudson.ExtensionPoint;
 import hudson.FilePath;
+import hudson.Functions;
 import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.BuildListener;
@@ -36,19 +38,16 @@ import hudson.model.JobProperty;
 import hudson.model.Run;
 import hudson.model.Run.RunnerAbortedException;
 import hudson.model.TaskListener;
-import jenkins.model.Jenkins;
 import hudson.scm.SCM;
 import hudson.tasks.BuildWrapper;
 import hudson.util.CopyOnWriteList;
-import org.jvnet.tiger_types.Types;
-
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.annotation.Nonnull;
+import org.jvnet.tiger_types.Types;
 
 /**
  * Receives notifications about builds.
@@ -91,10 +90,10 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
      *      Any exception/error thrown from this method will be swallowed to prevent broken listeners
      *      from breaking all the builds.
      */
-    public void onCompleted(R r, @Nonnull TaskListener listener) {}
+    public void onCompleted(R r, @NonNull TaskListener listener) {}
 
     /**
-     * Called after a build is moved to the {@link hudson.model.Run.State#COMPLETED} state.
+     * Called after a build is moved to the {@code Run.State.COMPLETED} state.
      *
      * <p>
      * At this point, all the records related to a build is written down to the disk. As such,
@@ -105,6 +104,14 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
      *      from breaking all the builds.
      */
     public void onFinalized(R r) {}
+
+    /**
+     * Called when a Run is entering execution.
+     * @param r
+     *      The started build.
+     * @since 2.9
+     */
+    public void onInitialize(R r) {}
 
     /**
      * Called when a build is started (i.e. it was in the queue, and will now start running
@@ -171,6 +178,7 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
      * @deprecated as of 1.281
      *      Put {@link Extension} on your class to get it auto-registered.
      */
+    @Deprecated
     public void register() {
         all().add(this);
     }
@@ -187,12 +195,13 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
      * @deprecated as of 1.281
      *      Use {@link #all()} for read access, and use {@link Extension} for registration.
      */
+    @Deprecated
     public static final CopyOnWriteList<RunListener> LISTENERS = ExtensionListView.createCopyOnWriteList(RunListener.class);
 
     /**
      * Fires the {@link #onCompleted(Run, TaskListener)} event.
      */
-    public static void fireCompleted(Run r, @Nonnull TaskListener listener) {
+    public static void fireCompleted(Run r, @NonNull TaskListener listener) {
         for (RunListener l : all()) {
             if(l.targetType.isInstance(r))
                 try {
@@ -202,6 +211,21 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
                 }
         }
     }
+
+    /**
+     * Fires the {@link #onInitialize(Run)} event.
+     */
+    public static void fireInitialize(Run r) {
+        for (RunListener l : all()) {
+            if(l.targetType.isInstance(r))
+                try {
+                    l.onInitialize(r);
+                } catch (Throwable e) {
+                    report(e);
+                }
+        }
+    }
+
 
     /**
      * Fires the {@link #onStarted(Run, TaskListener)} event.
@@ -221,7 +245,7 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
      * Fires the {@link #onFinalized(Run)} event.
      */
     public static void fireFinalized(Run r) {
-        if (Jenkins.getInstance() == null) {
+        if (!Functions.isExtensionsAvailable()) {
             return;
         }
         for (RunListener l : all()) {
@@ -252,7 +276,7 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
      * Returns all the registered {@link RunListener}s.
      */
     public static ExtensionList<RunListener> all() {
-        return Jenkins.getInstance().getExtensionList(RunListener.class);
+        return ExtensionList.lookup(RunListener.class);
     }
 
     private static void report(Throwable e) {
@@ -260,4 +284,5 @@ public abstract class RunListener<R extends Run> implements ExtensionPoint {
     }
 
     private static final Logger LOGGER = Logger.getLogger(RunListener.class.getName());
+
 }

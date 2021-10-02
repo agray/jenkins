@@ -23,26 +23,30 @@
  */
 package hudson.model;
 
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.EnvVars;
 import hudson.FilePath;
 import hudson.Launcher;
 import hudson.tasks.BuildWrapper;
 import hudson.util.VariableResolver;
-
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.UnsupportedEncodingException;
-import javax.servlet.ServletException;
-
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.util.regex.Pattern;
+import jenkins.util.SystemProperties;
 import org.apache.commons.fileupload.FileItem;
+import org.apache.commons.fileupload.FileItemHeaders;
 import org.apache.commons.fileupload.disk.DiskFileItem;
+import org.apache.commons.fileupload.util.FileItemHeadersImpl;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
@@ -59,7 +63,20 @@ import org.kohsuke.stapler.StaplerResponse;
  * @author Kohsuke Kawaguchi
  */
 public class FileParameterValue extends ParameterValue {
-    private transient final FileItem file;
+    private static final String FOLDER_NAME = "fileParameters";
+    private static final Pattern PROHIBITED_DOUBLE_DOT = Pattern.compile(".*[\\\\/]\\.\\.[\\\\/].*");
+    private static final long serialVersionUID = -143427023159076073L;
+
+    /**
+     * Escape hatch for SECURITY-1074, fileParameter used to escape their expected folder.
+     * It's not recommended to enable for security reasons. That option is only present for backward compatibility.
+     */
+    @Restricted(NoExternalUse.class)
+    @SuppressFBWarnings("MS_SHOULD_BE_FINAL")
+    public static /* Script Console modifiable */ boolean ALLOW_FOLDER_TRAVERSAL_OUTSIDE_WORKSPACE =
+            SystemProperties.getBoolean(FileParameterValue.class.getName() + ".allowFolderTraversalOutsideWorkspace");
+
+    private final transient FileItem file;
 
     /**
      * The name of the originally uploaded file.
@@ -68,6 +85,9 @@ public class FileParameterValue extends ParameterValue {
 
     /**
      * Overrides the location in the build to place this file. Initially set to {@link #getName()}
+     * The location could be directly the filename or also a hierarchical path. 
+     * The intermediate folders will be created automatically.
+     * Take care that no escape from the current directory is allowed and will result in the failure of the build.
      */
     private String location;
 
@@ -111,11 +131,7 @@ public class FileParameterValue extends ParameterValue {
 
     @Override
     public VariableResolver<String> createVariableResolver(AbstractBuild<?, ?> build) {
-        return new VariableResolver<String>() {
-            public String resolve(String name) {
-                return FileParameterValue.this.name.equals(name) ? originalFileName : null;
-            }
-        };
+        return name -> FileParameterValue.this.name.equals(name) ? originalFileName : null;
     }
 
     /**
@@ -138,10 +154,25 @@ public class FileParameterValue extends ParameterValue {
         return new BuildWrapper() {
             @Override
             public Environment setUp(AbstractBuild build, Launcher launcher, BuildListener listener) throws IOException, InterruptedException {
-            	if (!StringUtils.isEmpty(location)) {
+            	if (!StringUtils.isEmpty(location) && !StringUtils.isEmpty(file.getName())) {
             	    listener.getLogger().println("Copying file to "+location);
-                    FilePath locationFilePath = build.getWorkspace().child(location);
+                    FilePath ws = build.getWorkspace();
+                    if (ws == null) {
+                        throw new IllegalStateException("The workspace should be created when setUp method is called");
+                    }
+                    if (!ALLOW_FOLDER_TRAVERSAL_OUTSIDE_WORKSPACE && (PROHIBITED_DOUBLE_DOT.matcher(location).matches() || !ws.isDescendant(location))) {
+                        listener.error("Rejecting file path escaping base directory with relative path: " + location);
+                        // force the build to fail
+                        return null;
+                    }
+                    FilePath locationFilePath = ws.child(location);
                     locationFilePath.getParent().mkdirs();
+
+                    // TODO Remove this workaround after FILEUPLOAD-293 is resolved.
+                    if (locationFilePath.exists() && !locationFilePath.isDirectory()) {
+                        locationFilePath.delete();
+                    }
+
             	    locationFilePath.copyFrom(file);
                     locationFilePath.copyTo(new FilePath(getLocationUnderBuild(build)));
             	}
@@ -155,12 +186,13 @@ public class FileParameterValue extends ParameterValue {
 		final int prime = 31;
 		int result = super.hashCode();
 		result = prime * result
-				+ ((location == null) ? 0 : location.hashCode());
+				+ (location == null ? 0 : location.hashCode());
 		return result;
 	}
 
 	/**
-	 * In practice this will always be false, since location should be unique.
+	 * Compares file parameters (existing files will be considered as different).
+	 * @since 1.586 Function has been modified in order to avoid <a href="https://issues.jenkins.io/browse/JENKINS-19017">JENKINS-19017</a> issue (wrong merge of builds in the queue).
 	 */
 	@Override
 	public boolean equals(Object obj) {
@@ -171,12 +203,13 @@ public class FileParameterValue extends ParameterValue {
 		if (getClass() != obj.getClass())
 			return false;
 		FileParameterValue other = (FileParameterValue) obj;
-		if (location == null) {
-			if (other.location != null)
-				return false;
-		} else if (!location.equals(other.location))
-			return false;
-		return true;
+		
+		if (location == null && other.location == null) 
+			return true; // Consider null parameters as equal
+
+		//TODO: check fingerprints or checksums to improve the behavior (JENKINS-25211)
+		// Return false even if files are equal
+		return false;
 	}
 
     @Override
@@ -190,31 +223,11 @@ public class FileParameterValue extends ParameterValue {
 
     /**
      * Serve this file parameter in response to a {@link StaplerRequest}.
-     *
-     * @param request
-     * @param response
-     * @throws ServletException
-     * @throws IOException
      */
-    public void doDynamic(StaplerRequest request, StaplerResponse response) throws ServletException, IOException {
-        if (("/" + originalFileName).equals(request.getRestOfPath())) {
-            AbstractBuild build = (AbstractBuild)request.findAncestor(AbstractBuild.class).getObject();
-            File fileParameter = getLocationUnderBuild(build);
-            if (fileParameter.isFile()) {
-                InputStream data = new FileInputStream(fileParameter);
-                try {
-                    long lastModified = fileParameter.lastModified();
-                    long contentLength = fileParameter.length();
-                    if (request.hasParameter("view")) {
-                        response.serveFile(request, data, lastModified, contentLength, "plain.txt");
-                    } else {
-                        response.serveFile(request, data, lastModified, contentLength, originalFileName);
-                    }
-                } finally {
-                    IOUtils.closeQuietly(data);
-                }
-            }
-        }
+    public DirectoryBrowserSupport doDynamic(StaplerRequest request, StaplerResponse response) {
+        AbstractBuild build = (AbstractBuild)request.findAncestor(AbstractBuild.class).getObject();
+        File fileParameter = getFileParameterFolderUnderBuild(build);
+        return new DirectoryBrowserSupport(build, new FilePath(fileParameter), Messages.FileParameterValue_IndexTitle(), "folder.png", false);
     }
 
     /**
@@ -224,7 +237,11 @@ public class FileParameterValue extends ParameterValue {
      * @return the location to store the file parameter
      */
     private File getLocationUnderBuild(AbstractBuild build) {
-        return new File(build.getRootDir(), "fileParameters/" + location);
+        return new File(getFileParameterFolderUnderBuild(build), location);
+    }
+
+    private File getFileParameterFolderUnderBuild(AbstractBuild<?, ?> build){
+        return new File(build.getRootDir(), FOLDER_NAME);
     }
 
     /**
@@ -240,72 +257,101 @@ public class FileParameterValue extends ParameterValue {
             this.file = file;
         }
 
+        @Override
         public InputStream getInputStream() throws IOException {
-            return new FileInputStream(file);
+            try {
+                return Files.newInputStream(file.toPath());
+            } catch (InvalidPathException e) {
+                throw new IOException(e);
+            }
         }
 
+        @Override
         public String getContentType() {
             return null;
         }
 
+        @Override
         public String getName() {
             return file.getName();
         }
 
+        @Override
         public boolean isInMemory() {
             return false;
         }
 
+        @Override
         public long getSize() {
             return file.length();
         }
 
+        @Override
         public byte[] get() {
             try {
-                FileInputStream inputStream = new FileInputStream(file);
-                try {
+                try (InputStream inputStream = Files.newInputStream(file.toPath())) {
                     return IOUtils.toByteArray(inputStream);
-                } finally {
-                    inputStream.close();
                 }
-            } catch (IOException e) {
+            } catch (IOException | InvalidPathException e) {
                 throw new Error(e);
             }
         }
 
+        @Override
         public String getString(String encoding) throws UnsupportedEncodingException {
             return new String(get(), encoding);
         }
 
+        @Override
         public String getString() {
             return new String(get());
         }
 
+        @Override
         public void write(File to) throws Exception {
             new FilePath(file).copyTo(new FilePath(to));
         }
 
+        @Override
         public void delete() {
             file.delete();
         }
 
+        @Override
         public String getFieldName() {
             return null;
         }
 
+        @Override
         public void setFieldName(String name) {
         }
 
+        @Override
         public boolean isFormField() {
             return false;
         }
 
+        @Override
         public void setFormField(boolean state) {
         }
 
+        @Override
         @Deprecated
         public OutputStream getOutputStream() throws IOException {
-            return new FileOutputStream(file);
+            try {
+                return Files.newOutputStream(file.toPath());
+            } catch (InvalidPathException e) {
+                throw new IOException(e);
+            }
+        }
+
+        @Override
+        public FileItemHeaders getHeaders() {
+            return new FileItemHeadersImpl();
+        }
+
+        @Override
+        public void setHeaders(FileItemHeaders headers) {
         }
     }
 }

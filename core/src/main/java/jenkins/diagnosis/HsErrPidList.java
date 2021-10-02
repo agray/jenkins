@@ -1,41 +1,44 @@
 package jenkins.diagnosis;
 
-import com.sun.akuma.JavaVMArguments;
 import hudson.Extension;
 import hudson.Functions;
 import hudson.Util;
 import hudson.model.AdministrativeMonitor;
 import hudson.util.jna.Kernel32Utils;
-import jenkins.model.Jenkins;
-import org.apache.tools.ant.DirectoryScanner;
-import org.apache.tools.ant.Project;
-import org.apache.tools.ant.types.FileSet;
-
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.Reader;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
+import java.nio.file.InvalidPathException;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.apache.commons.io.IOUtils;
+import jenkins.model.Jenkins;
+import jenkins.security.stapler.StaplerDispatchable;
+import jenkins.util.JavaVMArguments;
+import org.apache.tools.ant.DirectoryScanner;
+import org.apache.tools.ant.Project;
+import org.apache.tools.ant.types.FileSet;
+import org.jenkinsci.Symbol;
 
 /**
  * Finds crash dump reports and show them in the UI.
  *
  * @author Kohsuke Kawaguchi
  */
-@Extension(optional=true)
+@Extension(optional=true) @Symbol("hsErrPid")
+// TODO why would an extension using a built-in extension point need to be marked optional?
 public class HsErrPidList extends AdministrativeMonitor {
     /**
      * hs_err_pid files that we think belong to us.
      */
-    /*package*/ final List<HsErrPidFile> files = new ArrayList<HsErrPidFile>();
+    /*package*/ final List<HsErrPidFile> files = new ArrayList<>();
 
     /**
      * Used to keep a marker file memory-mapped, so that we can find hs_err_pid files that belong to us.
@@ -43,10 +46,16 @@ public class HsErrPidList extends AdministrativeMonitor {
     private MappedByteBuffer map;
 
     public HsErrPidList() {
+        if (Functions.getIsUnitTest()) {
+            return;
+        }
         try {
-            FileChannel ch = new FileInputStream(getSecretKeyFile()).getChannel();
-            map = ch.map(MapMode.READ_ONLY,0,1);
-
+            try (FileChannel ch = FileChannel.open(getSecretKeyFile().toPath(), StandardOpenOption.READ)) {
+                map = ch.map(MapMode.READ_ONLY,0,1);
+            } catch (InvalidPathException e) {
+                throw new IOException(e);
+            }
+                
             scan("./hs_err_pid%p.log");
             if (Functions.isWindows()) {
                 File dir = Kernel32Utils.getTempDir();
@@ -59,9 +68,8 @@ public class HsErrPidList extends AdministrativeMonitor {
             // on different platforms, rules about the default locations are a lot more subtle.
 
             // check our arguments in the very end since this might fail on some platforms
-            JavaVMArguments args = JavaVMArguments.current();
-            for (String a : args) {
-                // see http://www.oracle.com/technetwork/java/javase/felog-138657.html
+            for (String a : JavaVMArguments.current()) {
+                // see https://docs.oracle.com/javase/8/docs/technotes/guides/troubleshoot/felog001.html
                 if (a.startsWith(ERROR_FILE_OPTION)) {
                     scan(a.substring(ERROR_FILE_OPTION.length()));
                 }
@@ -81,6 +89,7 @@ public class HsErrPidList extends AdministrativeMonitor {
     /**
      * Expose files to the URL.
      */
+    @StaplerDispatchable
     public List<HsErrPidFile> getFiles() {
         return files;
     }
@@ -114,9 +123,8 @@ public class HsErrPidList extends AdministrativeMonitor {
     private void scanFile(File log) {
         LOGGER.fine("Scanning "+log);
 
-        BufferedReader r=null;
-        try {
-            r = new BufferedReader(new FileReader(log));
+        try (Reader rawReader = new FileReader(log);
+             BufferedReader r = new BufferedReader(rawReader)) {
 
             if (!findHeader(r))
                 return;
@@ -135,13 +143,11 @@ public class HsErrPidList extends AdministrativeMonitor {
         } catch (IOException e) {
             // not a big enough deal.
             LOGGER.log(Level.FINE, "Failed to parse hs_err_pid file: " + log, e);
-        } finally {
-            IOUtils.closeQuietly(r);
         }
     }
 
     private File getSecretKeyFile() {
-        return new File(Jenkins.getInstance().getRootDir(),"secret.key");
+        return new File(Jenkins.get().getRootDir(),"secret.key");
     }
 
     private boolean findHeader(BufferedReader r) throws IOException {

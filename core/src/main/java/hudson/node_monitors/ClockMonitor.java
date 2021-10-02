@@ -23,16 +23,17 @@
  */
 package hudson.node_monitors;
 
+import hudson.Extension;
 import hudson.model.Computer;
 import hudson.model.Node;
 import hudson.remoting.Callable;
 import hudson.util.ClockDifference;
-import hudson.Extension;
-import org.kohsuke.stapler.StaplerRequest;
-
 import java.io.IOException;
-
 import net.sf.json.JSONObject;
+import org.jenkinsci.Symbol;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.StaplerRequest;
 
 /**
  * {@link NodeMonitor} that checks clock of {@link Node} to
@@ -46,8 +47,20 @@ public class ClockMonitor extends NodeMonitor {
         return DESCRIPTOR.get(c);
     }
 
-    @Extension
-    public static final AbstractNodeMonitorDescriptor<ClockDifference> DESCRIPTOR = new AbstractAsyncNodeMonitorDescriptor<ClockDifference>() {
+    /**
+     * @deprecated as of 2.0
+     *      Don't use this field, use injection.
+     */
+    @Deprecated
+    @Restricted(NoExternalUse.class)
+    public static /*almost final*/ AbstractNodeMonitorDescriptor<ClockDifference> DESCRIPTOR;
+
+    @Extension @Symbol("clock")
+    public static class DescriptorImpl extends AbstractAsyncNodeMonitorDescriptor<ClockDifference> {
+        public DescriptorImpl() {
+            DESCRIPTOR = this;
+        }
+
         @Override
         protected Callable<ClockDifference,IOException> createCallable(Computer c) {
             Node n = c.getNode();
@@ -55,6 +68,7 @@ public class ClockMonitor extends NodeMonitor {
             return n.getClockDifferenceCallable();
         }
 
+        @Override
         public String getDisplayName() {
             return Messages.ClockMonitor_DisplayName();
         }
@@ -63,5 +77,5 @@ public class ClockMonitor extends NodeMonitor {
         public NodeMonitor newInstance(StaplerRequest req, JSONObject formData) throws FormException {
             return new ClockMonitor();
         }
-    };
+    }
 }

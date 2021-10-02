@@ -26,16 +26,16 @@ package hudson.scm;
 import hudson.MarkupText;
 import hudson.Util;
 import hudson.model.AbstractBuild;
+import hudson.model.Run;
 import hudson.model.User;
-import org.kohsuke.stapler.export.Exported;
-import org.kohsuke.stapler.export.ExportedBean;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
 import java.util.Iterator;
 import java.util.List;
 import java.util.logging.Logger;
+import org.kohsuke.stapler.export.Exported;
+import org.kohsuke.stapler.export.ExportedBean;
 
 /**
  * Represents SCM change list.
@@ -54,12 +54,45 @@ import java.util.logging.Logger;
 public abstract class ChangeLogSet<T extends ChangeLogSet.Entry> implements Iterable<T> {
 
     /**
-     * {@link AbstractBuild} whose change log this object represents.
+     * Build whose change log this object represents.
      */
+    private final Run<?,?> run;
+    @Deprecated
     public final AbstractBuild<?,?> build;
+    private final RepositoryBrowser</* ideally T */?> browser;
 
+    /**
+     * @since 1.568
+     */
+    protected ChangeLogSet(Run<?,?> run, RepositoryBrowser<?> browser) {
+        this.run = run;
+        build = run instanceof AbstractBuild ? (AbstractBuild) run : null;
+        this.browser = browser;
+    }
+
+    @Deprecated
     protected ChangeLogSet(AbstractBuild<?, ?> build) {
-        this.build = build;
+        this(build, browserFromBuild(build));
+    }
+    private static RepositoryBrowser<?> browserFromBuild(AbstractBuild<?,?> build) {
+        if (build == null) { // not generally allowed, but sometimes done in unit tests
+            return null;
+        }
+        return build.getParent().getScm().getEffectiveBrowser();
+    }
+
+    /**
+     * @since 1.568
+     */
+    public Run<?,?> getRun() {
+        return run;
+    }
+
+    /**
+     * @since 1.568
+     */
+    public RepositoryBrowser<?> getBrowser() {
+        return browser;
     }
 
     /**
@@ -73,7 +106,7 @@ public abstract class ChangeLogSet<T extends ChangeLogSet.Entry> implements Iter
     // method for the remote API.
     @Exported
     public final Object[] getItems() {
-        List<T> r = new ArrayList<T>();
+        List<T> r = new ArrayList<>();
         for (T t : this)
             r.add(t);
         return r.toArray();
@@ -91,13 +124,19 @@ public abstract class ChangeLogSet<T extends ChangeLogSet.Entry> implements Iter
 
     /**
      * Constant instance that represents no changes.
+     * @since 1.568
      */
-    public static ChangeLogSet<? extends ChangeLogSet.Entry> createEmpty(AbstractBuild build) {
+    public static ChangeLogSet<? extends ChangeLogSet.Entry> createEmpty(Run build) {
         return new EmptyChangeLogSet(build);
     }
 
+    @Deprecated
+    public static ChangeLogSet<? extends ChangeLogSet.Entry> createEmpty(AbstractBuild build) {
+        return createEmpty((Run) build);
+    }
+
     @ExportedBean(defaultVisibility=999)
-    public static abstract class Entry {
+    public abstract static class Entry {
         private ChangeLogSet parent;
 
         public ChangeLogSet getParent() {
@@ -209,11 +248,11 @@ public abstract class ChangeLogSet<T extends ChangeLogSet.Entry> implements Iter
             MarkupText markup = new MarkupText(getMsg());
             for (ChangeLogAnnotator a : ChangeLogAnnotator.all())
                 try {
-                    a.annotate(parent.build,this,markup);
+                    a.annotate(parent.run, this, markup);
                 } catch(Exception e) {
                     LOGGER.info("ChangeLogAnnotator " + a.toString() + " failed to annotate message '" + getMsg() + "'; " + e.getMessage());
                 } catch(Error e) {
-                    LOGGER.severe("ChangeLogAnnotator " + a.toString() + " failed to annotate message '" + getMsg() + "'; " + e.getMessage());
+                    LOGGER.severe("ChangeLogAnnotator " + a + " failed to annotate message '" + getMsg() + "'; " + e.getMessage());
                 }
 
             return markup.toString(false);

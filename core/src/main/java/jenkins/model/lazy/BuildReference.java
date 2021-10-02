@@ -1,6 +1,9 @@
 package jenkins.model.lazy;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
+import hudson.ExtensionList;
 import hudson.ExtensionPoint;
 import hudson.model.Run;
 import java.lang.ref.Reference;
@@ -8,9 +11,8 @@ import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.annotation.CheckForNull;
-import javax.annotation.Nonnull;
-import jenkins.model.Jenkins;
+import jenkins.model.lazy.LazyBuildMixIn.RunMixIn;
+import jenkins.util.SystemProperties;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
 
@@ -34,7 +36,7 @@ public final class BuildReference<R> {
     private static final Logger LOGGER = Logger.getLogger(BuildReference.class.getName());
 
     final String id;
-    private final Holder<R> holder;
+    private volatile Holder<R> holder;
 
     public BuildReference(String id, R referent) {
         this.id = id;
@@ -47,7 +49,17 @@ public final class BuildReference<R> {
      * @see Holder#get
      */
     public @CheckForNull R get() {
-        return holder.get();
+        Holder<R> h = holder; // capture
+        return h!=null ? h.get() : null;
+    }
+
+    /**
+     * Clear the reference to make a particular R object effectively unreachable.
+     *
+     * @see RunMixIn#dropLinks()
+     */
+    /*package*/ void clear() {
+        holder = null;
     }
 
     @Override
@@ -55,7 +67,7 @@ public final class BuildReference<R> {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
 
-        BuildReference that = (BuildReference) o;
+        BuildReference<?> that = (BuildReference) o;
         return id.equals(that.id);
 
     }
@@ -63,6 +75,11 @@ public final class BuildReference<R> {
     @Override
     public int hashCode() {
         return id.hashCode();
+    }
+
+    @Override public String toString() {
+        R r = get();
+        return r != null ? r.toString() : id;
     }
 
     /**
@@ -91,23 +108,20 @@ public final class BuildReference<R> {
          * @param referent the thing to load
          * @return a reference, or null to consult the next factory
          */
-        @CheckForNull <R> Holder<R> make(@Nonnull R referent);
+        @CheckForNull <R> Holder<R> make(@NonNull R referent);
 
     }
 
     private static <R> Holder<R> findHolder(R referent) {
         if (referent == null) {
             // AbstractBuild.NONE
-            return new DefaultHolderFactory.NoHolder<R>();
+            return new DefaultHolderFactory.NoHolder<>();
         }
-        Jenkins j = Jenkins.getInstance();
-        if (j != null) {
-            for (HolderFactory f : j.getExtensionList(HolderFactory.class)) {
-                Holder<R> h = f.make(referent);
-                if (h != null) {
-                    LOGGER.log(Level.FINE, "created build reference for {0} using {1}", new Object[] {referent, f});
-                    return h;
-                }
+        for (HolderFactory f : ExtensionList.lookup(HolderFactory.class)) {
+            Holder<R> h = f.make(referent);
+            if (h != null) {
+                LOGGER.log(Level.FINE, "created build reference for {0} using {1}", new Object[] {referent, f});
+                return h;
             }
         }
         return new DefaultHolderFactory().make(referent);
@@ -117,13 +131,13 @@ public final class BuildReference<R> {
      * Default factory if none other are installed.
      * Its behavior can be controlled via the system property {@link DefaultHolderFactory#MODE_PROPERTY}:
      * <dl>
-     * <dt><code>soft</code> (default)
+     * <dt>{@code soft} (default)
      * <dd>Use {@link SoftReference}s. Builds will be kept around so long as memory pressure is not too high.
-     * <dt><code>weak</code>
+     * <dt>{@code weak}
      * <dd>Use {@link WeakReference}s. Builds will be kept only until the next full garbage collection cycle.
-     * <dt><code>strong</code>
+     * <dt>{@code strong}
      * <dd>Use strong references. Builds will still be loaded lazily, but once loaded, will not be released.
-     * <dt><code>none</code>
+     * <dt>{@code none}
      * <dd>Do not hold onto builds at all. Mainly offered as an option for the purpose of reproducing lazy-loading bugs.
      * </dl>
      */
@@ -131,17 +145,17 @@ public final class BuildReference<R> {
     @Extension(ordinal=Double.NEGATIVE_INFINITY) public static final class DefaultHolderFactory implements HolderFactory {
 
         public static final String MODE_PROPERTY = "jenkins.model.lazy.BuildReference.MODE";
-        private static final String mode = System.getProperty(MODE_PROPERTY);
+        private static final String mode = SystemProperties.getString(MODE_PROPERTY);
 
         @Override public <R> Holder<R> make(R referent) {
             if (mode == null || mode.equals("soft")) {
-                return new SoftHolder<R>(referent);
+                return new SoftHolder<>(referent);
             } else if (mode.equals("weak")) {
-                return new WeakHolder<R>(referent);
+                return new WeakHolder<>(referent);
             } else if (mode.equals("strong")) {
-                return new StrongHolder<R>(referent);
+                return new StrongHolder<>(referent);
             } else if (mode.equals("none")) {
-                return new NoHolder<R>();
+                return new NoHolder<>();
             } else {
                 throw new IllegalStateException("unrecognized value of " + MODE_PROPERTY + ": " + mode);
             }

@@ -23,18 +23,16 @@
  */
 package hudson.util;
 
-import hudson.Functions;
+import java.io.IOException;
 import org.kohsuke.accmod.Restricted;
 import org.kohsuke.accmod.restrictions.NoExternalUse;
-
-import java.io.IOException;
 
 /**
  * Model object used to display the error top page if
  * there appears to be no temporary directory.
  *
  * <p>
- * <tt>index.jelly</tt> would display a nice friendly error page.
+ * {@code index.jelly} would display a nice friendly error page.
  *
  * @author Kohsuke Kawaguchi
  */

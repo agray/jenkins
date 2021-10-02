@@ -25,9 +25,11 @@
 package hudson.search;
 
 import static javax.servlet.http.HttpServletResponse.SC_NOT_FOUND;
+
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.Util;
 import hudson.util.EditDistance;
-
 import java.io.IOException;
 import java.util.AbstractList;
 import java.util.ArrayList;
@@ -37,11 +39,15 @@ import java.util.List;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
 import javax.servlet.ServletException;
-
+import jenkins.model.Jenkins;
+import jenkins.util.MemoryReductionUtil;
+import jenkins.util.SystemProperties;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.Ancestor;
 import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.StaplerProxy;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
 import org.kohsuke.stapler.export.DataWriter;
@@ -59,7 +65,8 @@ import org.kohsuke.stapler.export.Flavor;
  * @author Kohsuke Kawaguchi
  * @see SearchableModelObject
  */
-public class Search {
+public class Search implements StaplerProxy {
+
     public void doIndex(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
         List<Ancestor> l = req.getAncestors();
         for( int i=l.size()-1; i>=0; i-- ) {
@@ -76,7 +83,7 @@ public class Search {
                     SuggestedItem target = find(index, query, smo);
                     if(target!=null) {
                         // found
-                        rsp.sendRedirect2(a.getUrl()+target.getUrl());
+                        rsp.sendRedirect2(req.getContextPath()+target.getUrl());
                         return;
                     }
                 }
@@ -129,9 +136,9 @@ public class Search {
      *      a certain threshold to avoid showing too many options. 
      */
     public SearchResult getSuggestions(StaplerRequest req, String query) {
-        Set<String> paths = new HashSet<String>();  // paths already added, to control duplicates
+        Set<String> paths = new HashSet<>();  // paths already added, to control duplicates
         SearchResultImpl r = new SearchResultImpl();
-        int max = req.hasParameter("max") ? Integer.parseInt(req.getParameter("max")) : 20;
+        int max = req.hasParameter("max") ? Integer.parseInt(req.getParameter("max")) : 100;
         SearchableModelObject smo = findClosestSearchableModelObject(req);
         for (SuggestedItem i : suggest(makeSuggestIndex(req), query, smo)) {
             if(r.size()>=max) {
@@ -144,7 +151,7 @@ public class Search {
         return r;
     }
 
-    private SearchableModelObject findClosestSearchableModelObject(StaplerRequest req) {
+    private @CheckForNull SearchableModelObject findClosestSearchableModelObject(StaplerRequest req) {
         List<Ancestor> l = req.getAncestors();
         for( int i=l.size()-1; i>=0; i-- ) {
             Ancestor a = l.get(i);
@@ -173,6 +180,7 @@ public class Search {
 
         private boolean hasMoreResults = false;
 
+        @Override
         public boolean hasMoreResults() {
             return hasMoreResults;
         }
@@ -181,7 +189,7 @@ public class Search {
     @ExportedBean
     public static class Result {
         @Exported
-        public List<Item> suggestions = new ArrayList<Item>();
+        public List<Item> suggestions = new ArrayList<>();
     }
 
     @ExportedBean(defaultVisibility=999)
@@ -196,11 +204,13 @@ public class Search {
 
     private enum Mode {
         FIND {
+            @Override
             void find(SearchIndex index, String token, List<SearchItem> result) {
                 index.find(token, result);
             }
         },
         SUGGEST {
+            @Override
             void find(SearchIndex index, String token, List<SearchItem> result) {
                 index.suggest(token, result);
             }
@@ -211,7 +221,7 @@ public class Search {
     }
 
     /**
-     * When there are mutiple suggested items, this method can narrow down the resultset
+     * When there are multiple suggested items, this method can narrow down the resultset
      * to the SuggestedItem that has a url that contains the query. This is useful is one
      * job has a display name that matches another job's project name.
      * @param r A list of Suggested items. It is assumed that there is at least one 
@@ -290,6 +300,7 @@ public class Search {
                 prefixMatch = i.getPath().startsWith(tokenList)?1:0;
             }
 
+            @Override
             public int compareTo(Tag that) {
                 int r = this.prefixMatch -that.prefixMatch;
                 if(r!=0)    return -r;  // ones with head match should show up earlier
@@ -297,7 +308,7 @@ public class Search {
             }
         }
 
-        List<Tag> buf = new ArrayList<Tag>();
+        List<Tag> buf = new ArrayList<>();
         List<SuggestedItem> items = find(Mode.SUGGEST, index, tokenList, searchContext);
 
         // sort them
@@ -314,21 +325,20 @@ public class Search {
     static final class TokenList {
         private final String[] tokens;
 
-        private final static String[] EMPTY = new String[0];
-
-        public TokenList(String tokenList) {
-            tokens = tokenList!=null ? tokenList.split("(?<=\\s)(?=\\S)") : EMPTY;
+        TokenList(String tokenList) {
+            tokens = tokenList!=null ? tokenList.split("(?<=\\s)(?=\\S)") : MemoryReductionUtil.EMPTY_STRING_ARRAY;
         }
 
         public int length() { return tokens.length; }
 
         /**
-         * Returns {@link List} such that its <tt>get(end)</tt>
-         * returns the concatanation of [token_start,...,token_end]
+         * Returns {@link List} such that its {@code get(end)}
+         * returns the concatenation of [token_start,...,token_end]
          * (both end inclusive.)
          */
         public List<String> subSequence(final int start) {
             return new AbstractList<String>() {
+                @Override
                 public String get(int index) {
                     StringBuilder buf = new StringBuilder();
                     for(int i=start; i<=start+index; i++ )
@@ -336,6 +346,7 @@ public class Search {
                     return buf.toString().trim();
                 }
 
+                @Override
                 public int size() {
                     return tokens.length-start;
                 }
@@ -343,6 +354,7 @@ public class Search {
         }
         
         
+        @Override
         public String toString() {
             StringBuilder s = new StringBuilder("TokenList{");
             for(String token : tokens) {
@@ -361,9 +373,9 @@ public class Search {
 
         List<SuggestedItem>[] paths = new List[tokens.length()+1]; // we won't use [0].
         for(int i=1;i<=tokens.length();i++)
-            paths[i] = new ArrayList<SuggestedItem>();
+            paths[i] = new ArrayList<>();
 
-        List<SearchItem> items = new ArrayList<SearchItem>(); // items found in 1 step
+        List<SearchItem> items = new ArrayList<>(); // items found in 1 step
 
         LOGGER.log(Level.FINE, "tokens={0}", tokens);
         
@@ -397,6 +409,22 @@ public class Search {
 
         return paths[tokens.length()];
     }
-    
-    private final static Logger LOGGER = Logger.getLogger(Search.class.getName());
+
+    @Override
+    @Restricted(NoExternalUse.class)
+    public Object getTarget() {
+        if (!SKIP_PERMISSION_CHECK) {
+            Jenkins.get().checkPermission(Jenkins.READ);
+        }
+        return this;
+    }
+
+    /**
+     * Escape hatch for StaplerProxy-based access control
+     */
+    @SuppressFBWarnings("MS_SHOULD_BE_FINAL")
+    @Restricted(NoExternalUse.class)
+    public static /* Script Console modifiable */ boolean SKIP_PERMISSION_CHECK = SystemProperties.getBoolean(Search.class.getName() + ".skipPermissionCheck");
+
+    private static final Logger LOGGER = Logger.getLogger(Search.class.getName());
 }

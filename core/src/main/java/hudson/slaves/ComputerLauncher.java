@@ -23,21 +23,26 @@
  */
 package hudson.slaves;
 
-import hudson.ExtensionPoint;
 import hudson.Extension;
-import hudson.model.*;
+import hudson.ExtensionPoint;
+import hudson.model.AbstractDescribableImpl;
+import hudson.model.Computer;
+import hudson.model.TaskListener;
 import hudson.remoting.Channel;
 import hudson.util.DescriptorList;
 import hudson.util.StreamTaskListener;
-
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PrintStream;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.apache.tools.ant.util.DeweyDecimal;
 
 /**
  * Extension point to allow control over how {@link Computer}s are "launched",
- * meaning how they get connected to their slave agent program.
+ * meaning how they get connected to their agent program.
  *
  * <h2>Associated View</h2>
  * <dl>
@@ -48,23 +53,23 @@ import org.apache.tools.ant.util.DeweyDecimal;
  * </dl>
  *
  * @author Stephen Connolly
- * @since 24-Apr-2008 22:12:35
+ * @since 1.216-ish
  * @see ComputerConnector
  */
 public abstract class ComputerLauncher extends AbstractDescribableImpl<ComputerLauncher> implements ExtensionPoint {
     /**
      * Returns true if this {@link ComputerLauncher} supports
-     * programatic launch of the slave agent in the target {@link Computer}.
+     * programmatic launch of the agent in the target {@link Computer}.
      */
     public boolean isLaunchSupported() {
         return true;
     }
 
     /**
-     * Launches the slave agent for the given {@link Computer}.
+     * Launches the agent for the given {@link Computer}.
      *
      * <p>
-     * If the slave agent is launched successfully, {@link SlaveComputer#setChannel(InputStream, OutputStream, TaskListener, Channel.Listener)}
+     * If the agent is launched successfully, {@link SlaveComputer#setChannel(InputStream, OutputStream, TaskListener, Channel.Listener)}
      * should be invoked in the end to notify Hudson of the established connection.
      * The operation could also fail, in which case there's no need to make any callback notification,
      * (except to notify the user of the failure through {@link StreamTaskListener}.)
@@ -82,7 +87,7 @@ public abstract class ComputerLauncher extends AbstractDescribableImpl<ComputerL
      * @throws IOException
      *      if the method throws an {@link IOException} or {@link InterruptedException}, the launch was considered
      *      a failure and the stack trace is reported into the listener. This handling is just so that the implementation
-     *      of this method doesn't have to dilligently catch those exceptions.
+     *      of this method doesn't have to diligently catch those exceptions.
      */
     public void launch(SlaveComputer computer, TaskListener listener) throws IOException , InterruptedException {
         // to remain compatible with the legacy implementation that overrides the old signature
@@ -93,6 +98,7 @@ public abstract class ComputerLauncher extends AbstractDescribableImpl<ComputerL
      * @deprecated as of 1.304
      *  Use {@link #launch(SlaveComputer, TaskListener)}
      */
+    @Deprecated
     public void launch(SlaveComputer computer, StreamTaskListener listener) throws IOException , InterruptedException {
         throw new UnsupportedOperationException(getClass()+" must implement the launch method");
     }
@@ -117,6 +123,7 @@ public abstract class ComputerLauncher extends AbstractDescribableImpl<ComputerL
      * @deprecated as of 1.304
      *  Use {@link #afterDisconnect(SlaveComputer, TaskListener)}
      */
+    @Deprecated
     public void afterDisconnect(SlaveComputer computer, StreamTaskListener listener) {
     }
 
@@ -143,6 +150,7 @@ public abstract class ComputerLauncher extends AbstractDescribableImpl<ComputerL
      * @deprecated as of 1.304
      *  Use {@link #beforeDisconnect(SlaveComputer, TaskListener)} 
      */
+    @Deprecated
     public void beforeDisconnect(SlaveComputer computer, StreamTaskListener listener) {
     }
 
@@ -159,10 +167,11 @@ public abstract class ComputerLauncher extends AbstractDescribableImpl<ComputerL
      *      Use {@link Extension} for registration, and use
      *      {@link jenkins.model.Jenkins#getDescriptorList(Class)} for read access.
      */
-    public static final DescriptorList<ComputerLauncher> LIST = new DescriptorList<ComputerLauncher>(ComputerLauncher.class);
+    @Deprecated
+    public static final DescriptorList<ComputerLauncher> LIST = new DescriptorList<>(ComputerLauncher.class);
 
     /**
-     * Given the output of "java -version" in <code>r</code>, determine if this
+     * Given the output of "java -version" in {@code r}, determine if this
      * version of Java is supported, or throw {@link IOException}.
      *
      * @param logger
@@ -176,14 +185,14 @@ public abstract class ComputerLauncher extends AbstractDescribableImpl<ComputerL
                                     final BufferedReader r)
             throws IOException {
         String line;
-        Pattern p = Pattern.compile("(?i)(?:java|openjdk) version \"([0-9.]+).*\"");
+        Pattern p = Pattern.compile("(?i)(?:java|openjdk) version \"([0-9.]+).*\".*");
         while (null != (line = r.readLine())) {
             Matcher m = p.matcher(line);
             if (m.matches()) {
                 final String versionStr = m.group(1);
                 logger.println(Messages.ComputerLauncher_JavaVersionResult(javaCommand, versionStr));
                 try {
-                    if (new DeweyDecimal(versionStr).isLessThan(new DeweyDecimal("1.6"))) {
+                    if (new DeweyDecimal(versionStr).isLessThan(new DeweyDecimal("1.8"))) {
                         throw new IOException(Messages
                                 .ComputerLauncher_NoJavaFound(line));
                     }
@@ -193,7 +202,7 @@ public abstract class ComputerLauncher extends AbstractDescribableImpl<ComputerL
                 return;
             }
         }
-        logger.println(Messages.ComputerLauncher_UknownJavaVersion(javaCommand));
-        throw new IOException(Messages.ComputerLauncher_UknownJavaVersion(javaCommand));
+        logger.println(Messages.ComputerLauncher_UnknownJavaVersion(javaCommand));
+        throw new IOException(Messages.ComputerLauncher_UnknownJavaVersion(javaCommand));
     }
 }

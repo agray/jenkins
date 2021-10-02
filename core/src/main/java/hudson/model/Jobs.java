@@ -23,9 +23,8 @@
  */
 package hudson.model;
 
-import hudson.util.DescriptorList;
 import hudson.Extension;
-
+import hudson.util.DescriptorList;
 import java.util.List;
 
 /**
@@ -34,6 +33,7 @@ import java.util.List;
  * @author Kohsuke Kawaguchi
  * @deprecated since 1.281
  */
+@Deprecated
 public class Jobs {
     /**
      * List of all installed {@link JobPropertyDescriptor} types.
@@ -47,6 +47,7 @@ public class Jobs {
      *      Use {@link JobPropertyDescriptor#all()} for read access,
      *      and {@link Extension} for registration.
      */
+    @Deprecated
     public static final List<JobPropertyDescriptor> PROPERTIES = (List)
             new DescriptorList<JobProperty<?>>((Class)JobProperty.class);
 }

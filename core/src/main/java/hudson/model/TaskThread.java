@@ -23,16 +23,16 @@
  */
 package hudson.model;
 
+import hudson.Functions;
 import hudson.console.AnnotatedLargeText;
 import hudson.util.StreamTaskListener;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.Reader;
 import java.lang.ref.WeakReference;
 import java.nio.charset.Charset;
-import org.kohsuke.stapler.framework.io.LargeText;
 import org.kohsuke.stapler.framework.io.ByteBuffer;
+import org.kohsuke.stapler.framework.io.LargeText;
 
 /**
  * {@link Thread} for performing one-off task.
@@ -51,6 +51,7 @@ public abstract class TaskThread extends Thread {
      * @deprecated as of Hudson 1.350
      *      Use {@link #log}. It's the same object, in a better type.
      */
+    @Deprecated
     private final LargeText text;
 
     /**
@@ -95,7 +96,7 @@ public abstract class TaskThread extends Thread {
      */
     protected final void associateWith(TaskAction action) {
         action.workerThread = this;
-        action.log = new WeakReference<AnnotatedLargeText>(log);
+        action.log = new WeakReference<>(log);
     }
 
     /**
@@ -130,7 +131,7 @@ public abstract class TaskThread extends Thread {
         } catch (InterruptedException e) {
             listener.getLogger().println("Aborted");
         } catch (Exception e) {
-            e.printStackTrace(listener.getLogger());
+            Functions.printStackTrace(e, listener.getLogger());
         } finally {
             listener = null;
             isRunning =false;
@@ -163,6 +164,7 @@ public abstract class TaskThread extends Thread {
          * @deprecated as of Hudson 1.350
          *      Use {@link #forMemory(TaskAction)} and pass in the calling {@link TaskAction}
          */
+        @Deprecated
         public static ListenerAndText forMemory() {
             return forMemory(null);
         }
@@ -171,6 +173,7 @@ public abstract class TaskThread extends Thread {
          * @deprecated as of Hudson 1.350
          *      Use {@link #forFile(File, TaskAction)} and pass in the calling {@link TaskAction}
          */
+        @Deprecated
         public static ListenerAndText forFile(File f) throws IOException {
             return forFile(f,null);
         }
@@ -184,7 +187,7 @@ public abstract class TaskThread extends Thread {
 
             return new ListenerAndText(
                 new StreamTaskListener(log),
-                new AnnotatedLargeText<TaskAction>(log,Charset.defaultCharset(),false,context)
+                new AnnotatedLargeText<>(log, Charset.defaultCharset(), false, context)
             );
         }
 
@@ -194,7 +197,7 @@ public abstract class TaskThread extends Thread {
         public static ListenerAndText forFile(File f, TaskAction context) throws IOException {
             return new ListenerAndText(
                 new StreamTaskListener(f),
-                new AnnotatedLargeText<TaskAction>(f,Charset.defaultCharset(),false,context)
+                new AnnotatedLargeText<>(f, Charset.defaultCharset(), false, context)
             );
         }
     }

@@ -24,20 +24,18 @@
 
 package hudson.cli;
 
+import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
+import static hudson.cli.CLICommandInvoker.Matcher.hasNoErrorOutput;
+import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
+import static hudson.cli.CLICommandInvoker.Matcher.succeeded;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.startsWith;
-import static hudson.cli.CLICommandInvoker.Matcher.failedWith;
-import static hudson.cli.CLICommandInvoker.Matcher.hasNoStandardOutput;
-import static hudson.cli.CLICommandInvoker.Matcher.hasNoErrorOutput;
-import static hudson.cli.CLICommandInvoker.Matcher.succeeded;
-
-import java.io.IOException;
 
 import hudson.model.ListView;
 import hudson.model.View;
+import java.io.IOException;
 import jenkins.model.Jenkins;
-
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
@@ -63,9 +61,9 @@ public class GetViewCommandTest {
                 .invokeWithArgs("aView")
         ;
 
-        assertThat(result, failedWith(-1));
+        assertThat(result, failedWith(6));
         assertThat(result, hasNoStandardOutput());
-        assertThat(result.stderr(), containsString("user is missing the View/Read permission"));
+        assertThat(result.stderr(), containsString("ERROR: user is missing the View/Read permission"));
     }
 
     @Test public void getViewShouldYieldConfigXml() throws Exception {
@@ -79,7 +77,7 @@ public class GetViewCommandTest {
 
         assertThat(result, succeeded());
         assertThat(result, hasNoErrorOutput());
-        assertThat(result.stdout(), startsWith("<?xml version=\"1.0\" encoding=\"UTF-8\"?>"));
+        assertThat(result.stdout(), startsWith("<?xml version=\"1.1\" encoding=\"UTF-8\"?>"));
         assertThat(result.stdout(), containsString("<name>aView</name>"));
     }
 
@@ -90,8 +88,8 @@ public class GetViewCommandTest {
                 .invokeWithArgs("never_created")
         ;
 
-        assertThat(result, failedWith(-1));
+        assertThat(result, failedWith(3));
         assertThat(result, hasNoStandardOutput());
-        assertThat(result.stderr(), containsString("No view named never_created inside view Jenkins"));
+        assertThat(result.stderr(), containsString("ERROR: No view named never_created inside view Jenkins"));
     }
 }

@@ -23,7 +23,6 @@ THE SOFTWARE.
 -->
 
 <?jelly escape-by-default='true'?>
-<?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form">
   <st:documentation>
     Generates a listing of the build artifacts.
@@ -41,9 +40,14 @@ THE SOFTWARE.
   </st:documentation>
   <j:if test="${!h.isArtifactsPermissionEnabled() or h.isArtifactsPermissionEnabled() and h.hasPermission(it,attrs.permission)}">
     <j:set var="artifacts" value="${build.getArtifactsUpTo(build.TREE_CUTOFF+1)}" />
-    <j:if test="${!build.building and !empty(artifacts)}">
+    <j:if test="${!empty(artifacts)}">
       <t:summary icon="package.png">
         <a href="${baseURL}artifact/">${caption}</a>
+        <j:if test="${build.building}">
+          <p>
+            ${%building}
+          </p>
+        </j:if>
         <j:choose>
           <j:when test="${size(artifacts) le build.LIST_CUTOFF}">
             <!-- if not too many, just list them -->
@@ -51,7 +55,7 @@ THE SOFTWARE.
               <j:forEach var="f" items="${artifacts}">
                 <tr>
                   <td>
-                    <img src="${imagesURL}/16x16/text.png" alt="" height="16" width="16"/>
+                    <l:icon class="icon-text icon-sm"/>
                   </td>
                   <td>
                     <a href="${baseURL}artifact/${f.href}">${f.displayPath}</a>
@@ -62,7 +66,7 @@ THE SOFTWARE.
                   <td>
                     <j:if test="${app.fingerprintMap.ready}">
                       <a href="${baseURL}artifact/${f.href}/*fingerprint*/">
-                        <img src="${imagesURL}/16x16/fingerprint.png" alt="[fingerprint]" height="16" width="16"/>
+                        <l:icon class="icon-fingerprint icon-sm"/>
                       </a>
                       <st:nbsp/>
                     </j:if>
@@ -76,7 +80,6 @@ THE SOFTWARE.
               <!-- otherwise (unless way too many) use a tree view -->
               <l:yui module="treeview"/>
               <link rel="stylesheet" href="${resURL}/scripts/yui/treeview/assets/skins/sam/treeview.css" type="text/css"/>
-              <link rel="stylesheet" href="${resURL}/scripts/yui/fonts/fonts-min.css" type="text/css"/>
               <style type="text/css">#artifact-tree td { vertical-align:middle; }</style>
               <br/>
               <small>

@@ -1,5 +1,3 @@
-// @include lib.form.dragdrop.dragdrop
-
 // do the ones that extract innerHTML so that they can get their original HTML before
 // other behavior rules change them (like YUI buttons.)
 Behaviour.specify("DIV.hetero-list-container", 'hetero-list', -100, function(e) {
@@ -10,9 +8,12 @@ Behaviour.specify("DIV.hetero-list-container", 'hetero-list', -100, function(e) 
         var menu = document.createElement("SELECT");
         var btns = findElementsBySelector(e,"INPUT.hetero-list-add"),
             btn = btns[btns.length-1]; // In case nested content also uses hetero-list
+        if (!btn) {
+            return;
+        }
         YAHOO.util.Dom.insertAfter(menu,btn);
 
-        var prototypes = $(e.lastChild);
+        var prototypes = $(e.lastElementChild);
         while(!prototypes.hasClassName("prototypes"))
             prototypes = prototypes.previous();
         var insertionPoint = prototypes.previous();    // this is where the new item is inserted.
@@ -23,17 +24,23 @@ Behaviour.specify("DIV.hetero-list-container", 'hetero-list', -100, function(e) 
             var name = n.getAttribute("name");
             var tooltip = n.getAttribute("tooltip");
             var descriptorId = n.getAttribute("descriptorId");
-            menu.options[i] = new Option(n.getAttribute("title"),""+i);
+            // YUI Menu interprets this <option> text node as HTML, so let's escape it again!
+            var title = n.getAttribute("title");
+            if (title) {
+                title = title.escapeHTML();
+            }
+            menu.options[i] = new Option(title,""+i);
             templates.push({html:n.innerHTML, name:name, tooltip:tooltip,descriptorId:descriptorId});
             i++;
         });
         Element.remove(prototypes);
 
-        var withDragDrop = initContainerDD(e);
+        // Initialize drag & drop for this component
+        var withDragDrop = registerSortableDragDrop(e);
 
         var menuAlign = (btn.getAttribute("menualign")||"tl-bl");
 
-        var menuButton = new YAHOO.widget.Button(btn, { type: "menu", menu: menu, menualignment: menuAlign.split("-") });
+        var menuButton = new YAHOO.widget.Button(btn, { type: "menu", menu: menu, menualignment: menuAlign.split("-"), menuminscrollheight: 250 });
         $(menuButton._button).addClassName(btn.className);    // copy class names
         $(menuButton._button).setAttribute("suffix",btn.getAttribute("suffix"));
         menuButton.getMenu().clickEvent.subscribe(function(type,args,value) {
@@ -50,7 +57,7 @@ Behaviour.specify("DIV.hetero-list-container", 'hetero-list', -100, function(e) 
 
             var scroll = document.body.scrollTop;
 
-            renderOnDemand(findElementsBySelector(nc,"TR.config-page")[0],function() {
+            renderOnDemand(findElementsBySelector(nc,"div.config-page")[0],function() {
                 function findInsertionPoint() {
                     // given the element to be inserted 'prospect',
                     // and the array of existing items 'current',
@@ -98,7 +105,8 @@ Behaviour.specify("DIV.hetero-list-container", 'hetero-list', -100, function(e) 
                 }
                 (e.hasClassName("honor-order") ? findInsertionPoint() : insertionPoint).insert({before:nc});
 
-                if(withDragDrop)    prepareDD(nc);
+                // Initialize drag & drop for this component
+                if(withDragDrop) registerSortableDragDrop(nc);
 
                 new YAHOO.util.Anim(nc, {
                     opacity: { to:1 }
@@ -121,7 +129,7 @@ Behaviour.specify("DIV.hetero-list-container", 'hetero-list', -100, function(e) 
         });
 
         if (e.hasClassName("one-each")) {
-            // does this container already has a ocnfigured instance of the specified descriptor ID?
+            // does this container already has a configured instance of the specified descriptor ID?
             function has(id) {
                 return Prototype.Selector.find(e.childElements(),"DIV.repeated-chunk[descriptorId=\""+id+"\"]")!=null;
             }

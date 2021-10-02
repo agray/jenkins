@@ -9,11 +9,20 @@ import hudson.model.Computer;
 import hudson.model.Job;
 import hudson.model.ModelObject;
 import hudson.model.Node;
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import javax.servlet.ServletException;
 import org.apache.commons.jelly.JellyContext;
 import org.apache.commons.jelly.JellyException;
 import org.apache.commons.jelly.JellyTagException;
 import org.apache.commons.jelly.Script;
 import org.apache.commons.jelly.XMLOutput;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.DoNotUse;
 import org.kohsuke.stapler.HttpResponse;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest;
@@ -25,14 +34,6 @@ import org.kohsuke.stapler.export.Flavor;
 import org.kohsuke.stapler.jelly.JellyClassTearOff;
 import org.kohsuke.stapler.jelly.JellyFacet;
 import org.xml.sax.helpers.DefaultHandler;
-
-import javax.servlet.ServletException;
-import java.io.IOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
 
 /**
  * {@link ModelObject} that has context menu in the breadcrumb.
@@ -53,21 +54,22 @@ public interface ModelObjectWithContextMenu extends ModelObject {
      * which implements the default behaviour. See {@link ContextMenu#from(ModelObjectWithContextMenu, StaplerRequest, StaplerResponse)}
      * for more details of what it does. This should suit most implementations.
      */
-    public ContextMenu doContextMenu(StaplerRequest request, StaplerResponse response) throws Exception;
+    ContextMenu doContextMenu(StaplerRequest request, StaplerResponse response) throws Exception;
 
     /**
      * Data object that represents the context menu.
      *
-     * Via {@link HttpResponse}, this class is capable of converting itself to JSON that &lt;l:breadcrumb/> understands.
+     * Via {@link HttpResponse}, this class is capable of converting itself to JSON that {@code <l:breadcrumb/>} understands.
      */
     @ExportedBean
-    public class ContextMenu implements HttpResponse {
+    class ContextMenu implements HttpResponse {
         /**
          * The actual contents of the menu.
          */
         @Exported(inline=true)
-        public final List<MenuItem> items = new ArrayList<MenuItem>();
+        public final List<MenuItem> items = new ArrayList<>();
         
+        @Override
         public void generateResponse(StaplerRequest req, StaplerResponse rsp, Object o) throws IOException, ServletException {
             rsp.serveExposedBean(req,this,Flavor.JSON);
         }
@@ -129,6 +131,18 @@ public interface ModelObjectWithContextMenu extends ModelObject {
         }
 
         /**
+         * Add a header row (no icon, no URL, rendered in header style).
+         *
+         * @since 2.231
+         */
+        @Restricted(DoNotUse.class) // manage.jelly only
+        public ContextMenu addHeader(String title) {
+            final MenuItem item = new MenuItem().withDisplayName(title);
+            item.header = true;
+            return add(item);
+        }
+
+        /**
          * Adds a manually constructed {@link MenuItem}
          *
          * @since 1.513
@@ -147,7 +161,7 @@ public interface ModelObjectWithContextMenu extends ModelObject {
             Computer c = n.toComputer();
             return add(new MenuItem()
                 .withDisplayName(n.getDisplayName())
-                .withStockIcon((c==null) ? "computer.png" : c.getIcon())
+                .withStockIcon(c == null ? "computer.png" : c.getIcon())
                 .withContextRelativeUrl(n.getSearchUrl()));
         }
 
@@ -180,7 +194,7 @@ public interface ModelObjectWithContextMenu extends ModelObject {
          * 
          * <p>
          * This method uses {@code sidepanel.groovy} to run the side panel generation, captures
-         * the use of &lt;l:task> tags, and then converts those into {@link MenuItem}s. This is
+         * the use of {@code <l:task>} tags, and then converts those into {@link MenuItem}s. This is
          * supposed to make this work with most existing {@link ModelObject}s that follow the standard
          * convention.
          * 
@@ -202,10 +216,12 @@ public interface ModelObjectWithContextMenu extends ModelObject {
                 request.setAttribute("mode","side-panel");
                 // run sidepanel but ignore generated HTML
                 facet.scriptInvoker.invokeScript(request,response,new Script() {
+                    @Override
                     public Script compile() throws JellyException {
                         return this;
                     }
 
+                    @Override
                     public void run(JellyContext context, XMLOutput output) throws JellyTagException {
                         Functions.initPageVariables(context);
                         s.run(context,output);
@@ -225,7 +241,7 @@ public interface ModelObjectWithContextMenu extends ModelObject {
      * Menu item in {@link ContextMenu}
      */
     @ExportedBean
-    public class MenuItem {
+    class MenuItem {
         /**
          * Target of the link.
          *
@@ -258,6 +274,13 @@ public interface ModelObjectWithContextMenu extends ModelObject {
          * @since 1.512
          */
         @Exported public boolean requiresConfirmation;
+
+
+        /**
+         * True to display this item as a section header.
+         * @since 2.231
+         */
+        @Exported public boolean header;
 
         /**
          * If this is a submenu, definition of subitems.

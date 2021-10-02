@@ -2,7 +2,7 @@ package jenkins.util;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
+import java.nio.charset.StandardCharsets;
 
 /**
  * Filtering {@link OutputStream} that looks for {@link #MARK} in the output stream and notifies the callback.
@@ -24,6 +24,7 @@ public abstract class MarkFindingOutputStream extends OutputStream {
      */
     private int match = 0;
 
+    @Override
     public synchronized void write(int b) throws IOException {
         if (MBYTES[match] == b) {// another byte matched. Good. Keep going...
             match++;
@@ -46,7 +47,8 @@ public abstract class MarkFindingOutputStream extends OutputStream {
         }
     }
 
-    public void write(byte b[], int off, int len) throws IOException {
+    @Override
+    public void write(byte[] b, int off, int len) throws IOException {
         final int start = off; 
         final int end = off + len;
         for (int i=off; i<end; ) {
@@ -85,11 +87,13 @@ public abstract class MarkFindingOutputStream extends OutputStream {
             base.write(b, off, len-match);
     }
 
+    @Override
     public void flush() throws IOException {
         flushPartialMatch();
         base.flush();
     }
 
+    @Override
     public void close() throws IOException {
         flushPartialMatch();
         base.close();
@@ -109,10 +113,6 @@ public abstract class MarkFindingOutputStream extends OutputStream {
     private static final byte[] MBYTES = toUTF8(MARK);
     
     private static byte[] toUTF8(String s) {
-        try {
-            return s.getBytes("UTF-8");
-        } catch (UnsupportedEncodingException e) {
-            throw new AssertionError(e);
-        }
+        return s.getBytes(StandardCharsets.UTF_8);
     }
 }

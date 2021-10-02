@@ -23,10 +23,9 @@
  */
 package hudson.triggers;
 
+import hudson.Extension;
 import hudson.model.Item;
 import hudson.util.DescriptorList;
-import hudson.Extension;
-
 import java.util.List;
 
 /**
@@ -36,12 +35,14 @@ import java.util.List;
  * @deprecated as of 1.286
  *      See each member for how to migrate your code.
  */
+@Deprecated
 public class Triggers {
     /**
      * All registered {@link TriggerDescriptor} implementations.
      * @deprecated as of 1.286
      *      Use {@link Trigger#all()} for read access, and {@link Extension} for registration.
      */
+    @Deprecated
     public static final List<TriggerDescriptor> TRIGGERS = (List)new DescriptorList<Trigger<?>>((Class)Trigger.class);
 //    Descriptor.toList(
 //        SCMTrigger.DESCRIPTOR,
@@ -49,11 +50,12 @@ public class Triggers {
 //    );
 
     /**
-     * Returns a subset of {@link TriggerDescriptor}s that applys to the given item.
+     * Returns a subset of {@link TriggerDescriptor}s that applies to the given item.
      *
      * @deprecated as of 1.286
      *      Use {@link Trigger#for_(Item)}.
      */
+    @Deprecated
     public static List<TriggerDescriptor> getApplicableTriggers(Item i) {
         return Trigger.for_(i);
     }

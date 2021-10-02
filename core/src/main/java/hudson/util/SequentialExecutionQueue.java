@@ -1,9 +1,10 @@
 package hudson.util;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
-import java.util.HashSet;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 
@@ -22,15 +23,15 @@ import java.util.concurrent.ExecutorService;
  */
 public class SequentialExecutionQueue implements Executor {
     /**
-     * Access is sycnhronized by {@code Queue.this}
+     * Access is synchronized by {@code Queue.this}
      */
-    private final Map<Runnable,QueueEntry> entries = new HashMap<Runnable,QueueEntry>();
+    private final Map<Runnable,QueueEntry> entries = new HashMap<>();
     private ExecutorService executors;
 
     /**
      * {@link Runnable}s that are currently executing. Useful for trouble-shooting.
      */
-    private final Set<QueueEntry> inProgress = new HashSet<QueueEntry>();
+    private final Set<QueueEntry> inProgress = new HashSet<>();
 
     public SequentialExecutionQueue(ExecutorService executors) {
         this.executors = executors;
@@ -58,7 +59,8 @@ public class SequentialExecutionQueue implements Executor {
     }
 
 
-    public synchronized void execute(Runnable item) {
+    @Override
+    public synchronized void execute(@NonNull Runnable item) {
         QueueEntry e = entries.get(item);
         if(e==null) {
             e = new QueueEntry(item);
@@ -85,7 +87,7 @@ public class SequentialExecutionQueue implements Executor {
      * Gets {@link Runnable}s that are currently executed by a live thread.
      */
     public synchronized Set<Runnable> getInProgress() {
-        Set<Runnable> items = new HashSet<Runnable>();
+        Set<Runnable> items = new HashSet<>();
         for (QueueEntry entry : inProgress) {
             items.add(entry.item);
         }
@@ -108,6 +110,7 @@ public class SequentialExecutionQueue implements Executor {
             executors.submit(this);
         }
 
+        @Override
         public void run() {
             try {
                 synchronized (SequentialExecutionQueue.this) {

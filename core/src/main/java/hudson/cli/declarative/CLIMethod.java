@@ -23,23 +23,23 @@
  */
 package hudson.cli.declarative;
 
+import static java.lang.annotation.ElementType.METHOD;
+import static java.lang.annotation.RetentionPolicy.RUNTIME;
+
 import hudson.cli.CLICommand;
 import hudson.util.ListBoxModel.Option;
+import java.lang.annotation.Documented;
+import java.lang.annotation.Retention;
+import java.lang.annotation.Target;
 import org.jvnet.hudson.annotation_indexer.Indexed;
 import org.kohsuke.args4j.Argument;
-
-import java.lang.annotation.Documented;
-import static java.lang.annotation.ElementType.METHOD;
-import java.lang.annotation.Retention;
-import static java.lang.annotation.RetentionPolicy.RUNTIME;
-import java.lang.annotation.Target;
 
 /**
  * Annotates methods on model objects to expose them as CLI commands.
  *
  * <p>
- * You need to have <tt>Messages.properties</tt> in the same package with the
- * <tt>CLI.<i>command-name</i>.shortDescription</tt> key to describe the command.
+ * You need to have {@code Messages.properties} in the same package with the
+ * {@code CLI.<i>command-name</i>.shortDescription} key to describe the command.
  * This is used for the same purpose as {@link CLICommand#getShortDescription()}.
  *
  * <p>
@@ -59,7 +59,7 @@ import java.lang.annotation.Target;
  */
 @Indexed
 @Retention(RUNTIME)
-@Target({METHOD})
+@Target(METHOD)
 @Documented
 public @interface CLIMethod {
     /**

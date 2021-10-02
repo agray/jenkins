@@ -23,9 +23,16 @@
  */
 package hudson.model;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
+import hudson.Util;
+import java.util.Objects;
 import net.sf.json.JSONObject;
+import org.jenkinsci.Symbol;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.DoNotUse;
 import org.kohsuke.stapler.DataBoundConstructor;
+import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.StaplerRequest;
 
 /**
@@ -34,15 +41,32 @@ import org.kohsuke.stapler.StaplerRequest;
 public class StringParameterDefinition extends SimpleParameterDefinition {
 
     private String defaultValue;
+    private boolean trim;
 
+    /**
+     * @since 2.281
+     */
     @DataBoundConstructor
-    public StringParameterDefinition(String name, String defaultValue, String description) {
-        super(name, description);
-        this.defaultValue = defaultValue;
+    public StringParameterDefinition(String name) {
+        super(name);
     }
 
+    public StringParameterDefinition(String name, String defaultValue, String description, boolean trim) {
+        this(name);
+        setDefaultValue(defaultValue);
+        setDescription(description);
+        setTrim(trim);
+    }
+
+    public StringParameterDefinition(String name, String defaultValue, String description) {
+        this(name);
+        setDefaultValue(defaultValue);
+        setDescription(description);
+    }
+    
     public StringParameterDefinition(String name, String defaultValue) {
-        this(name, defaultValue, null);
+        this(name);
+        setDefaultValue(defaultValue);
     }
 
     @Override
@@ -59,19 +83,55 @@ public class StringParameterDefinition extends SimpleParameterDefinition {
         return defaultValue;
     }
 
+    /**
+     * 
+     * @return original or trimmed defaultValue (depending on trim)
+     */
+    @Restricted(DoNotUse.class) // Jelly
+    public String getDefaultValue4Build() {
+        if (isTrim()) {
+            return Util.fixNull(defaultValue).trim();
+        }
+        return defaultValue;
+    }
+
+    @DataBoundSetter
     public void setDefaultValue(String defaultValue) {
-        this.defaultValue = defaultValue;
+        this.defaultValue = Util.fixEmpty(defaultValue);
+    }
+
+    /**
+     * 
+     * @return trim - {@code true}, if trim options has been selected, else return {@code false}.
+     *      Trimming will happen when creating {@link StringParameterValue}s,
+     *      the value in the config will not be changed.
+     * @since 2.90
+     */
+    public boolean isTrim() {
+        return trim;
+    }
+
+    /**
+     * @since 2.281
+     */
+    @DataBoundSetter
+    public void setTrim(boolean trim) {
+        this.trim = trim;
     }
     
     @Override
     public StringParameterValue getDefaultParameterValue() {
-        StringParameterValue v = new StringParameterValue(getName(), defaultValue, getDescription());
-        return v;
+        StringParameterValue value = new StringParameterValue(getName(), defaultValue, getDescription());
+        if (isTrim()) {
+            value.doTrim();
+        }
+        return value;
     }
 
-    @Extension
+    @Extension @Symbol({"string","stringParam"})
     public static class DescriptorImpl extends ParameterDescriptor {
         @Override
+        @NonNull
         public String getDisplayName() {
             return Messages.StringParameterDefinition_DisplayName();
         }
@@ -85,11 +145,47 @@ public class StringParameterDefinition extends SimpleParameterDefinition {
     @Override
     public ParameterValue createValue(StaplerRequest req, JSONObject jo) {
         StringParameterValue value = req.bindJSON(StringParameterValue.class, jo);
+        if (isTrim() && value!=null) {
+            value.doTrim();
+        }
         value.setDescription(getDescription());
         return value;
     }
 
-    public ParameterValue createValue(String value) {
-        return new StringParameterValue(getName(), value, getDescription());
+    @Override
+    public ParameterValue createValue(String str) {
+        StringParameterValue value = new StringParameterValue(getName(), str, getDescription());
+        if (isTrim()) {
+            value.doTrim();
+        }
+        return value;
+    }
+
+    @Override
+    public int hashCode() {
+        if (StringParameterDefinition.class != getClass()) {
+            return super.hashCode();
+        }
+        return Objects.hash(getName(), getDescription(), defaultValue, trim);
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (StringParameterDefinition.class != getClass())
+            return super.equals(obj);
+        if (this == obj)
+            return true;
+        if (obj == null)
+            return false;
+        if (getClass() != obj.getClass())
+            return false;
+        StringParameterDefinition other = (StringParameterDefinition) obj;
+        if (!Objects.equals(getName(), other.getName()))
+            return false;
+        if (!Objects.equals(getDescription(), other.getDescription()))
+            return false;
+        if (!Objects.equals(defaultValue, other.defaultValue))
+            return false;
+        return trim == other.trim;
     }
 }

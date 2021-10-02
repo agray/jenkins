@@ -23,18 +23,16 @@
  */
 package hudson.model;
 
+import hudson.search.Search;
 import hudson.search.SearchFactory;
+import hudson.search.SearchIndex;
+import hudson.search.SearchIndexBuilder;
+import hudson.search.SearchableModelObject;
+import java.io.IOException;
+import javax.servlet.ServletException;
+import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
-import org.kohsuke.stapler.Stapler;
-
-import javax.servlet.ServletException;
-import java.io.IOException;
-
-import hudson.search.SearchableModelObject;
-import hudson.search.Search;
-import hudson.search.SearchIndexBuilder;
-import hudson.search.SearchIndex;
 import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
@@ -47,6 +45,7 @@ public abstract class AbstractModelObject implements SearchableModelObject {
      * Displays the error in a page.
      */
     protected final void sendError(Exception e, StaplerRequest req, StaplerResponse rsp) throws ServletException, IOException {
+        req.setAttribute("exception", e);
         sendError(e.getMessage(),req,rsp);
     }
 
@@ -80,6 +79,7 @@ public abstract class AbstractModelObject implements SearchableModelObject {
      * @deprecated 
      *      Use {@link RequirePOST} on your method.
      */
+    @Deprecated
     protected final void requirePOST() throws ServletException {
         StaplerRequest req = Stapler.getCurrentRequest();
         if (req==null)  return; // invoked outside the context of servlet
@@ -95,10 +95,12 @@ public abstract class AbstractModelObject implements SearchableModelObject {
         return new SearchIndexBuilder().addAllAnnotations(this);
     }
 
+    @Override
     public final SearchIndex getSearchIndex() {
         return makeSearchIndex().make();
     }
 
+    @Override
     public Search getSearch() {
         for (SearchFactory sf : SearchFactory.all()) {
             Search s = sf.createFor(this);
@@ -111,6 +113,7 @@ public abstract class AbstractModelObject implements SearchableModelObject {
     /**
      * Default implementation that returns the display name.
      */
+    @Override
     public String getSearchName() {
         return getDisplayName();
     }

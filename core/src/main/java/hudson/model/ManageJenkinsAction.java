@@ -25,25 +25,29 @@ package hudson.model;
 
 import hudson.Extension;
 import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
 
 /**
  * Adds the "Manage Jenkins" link to the top page.
  *
  * @author Kohsuke Kawaguchi
  */
-@Extension(ordinal=100)
+@Extension(ordinal=100) @Symbol("manageJenkins")
 public class ManageJenkinsAction implements RootAction {
+    @Override
     public String getIconFileName() {
-        if (Jenkins.getInstance().hasPermission(Jenkins.ADMINISTER))
-            return "setting.png";
+        if (Jenkins.get().hasAnyPermission(Jenkins.MANAGE, Jenkins.SYSTEM_READ))
+            return "gear.png";
         else
             return null;
     }
 
+    @Override
     public String getDisplayName() {
         return Messages.ManageJenkinsAction_DisplayName();
     }
 
+    @Override
     public String getUrlName() {
         return "/manage";
     }

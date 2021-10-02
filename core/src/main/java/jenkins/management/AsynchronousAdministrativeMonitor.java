@@ -1,19 +1,21 @@
 package jenkins.management;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.AbortException;
+import hudson.Functions;
 import hudson.console.AnnotatedLargeText;
 import hudson.model.AdministrativeMonitor;
 import hudson.model.TaskListener;
 import hudson.security.ACL;
+import hudson.security.ACLContext;
 import hudson.util.StreamTaskListener;
-import jenkins.model.Jenkins;
-import jenkins.security.RekeySecretAdminMonitor;
-import org.apache.commons.io.output.NullOutputStream;
-
 import java.io.File;
+import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import jenkins.model.Jenkins;
+import jenkins.security.RekeySecretAdminMonitor;
 
 /**
  * Convenient partial implementation of {@link AdministrativeMonitor} that involves a background "fixing" action
@@ -45,7 +47,7 @@ public abstract class AsynchronousAdministrativeMonitor extends AdministrativeMo
      * Used to URL-bind {@link AnnotatedLargeText}.
      */
     public AnnotatedLargeText getLogText() {
-        return new AnnotatedLargeText<AsynchronousAdministrativeMonitor>(
+        return new AnnotatedLargeText<>(
                 getLogFile(), Charset.defaultCharset(),
                 !isFixingActive(), this);
     }
@@ -60,9 +62,10 @@ public abstract class AsynchronousAdministrativeMonitor extends AdministrativeMo
     }
 
     protected File getBaseDir() {
-        return new File(Jenkins.getInstance().getRootDir(),getClass().getName());
+        return new File(Jenkins.get().getRootDir(),getClass().getName());
     }
 
+    @Override
     public abstract String getDisplayName();
 
     /**
@@ -95,19 +98,36 @@ public abstract class AsynchronousAdministrativeMonitor extends AdministrativeMo
 
         @Override
         public void run() {
-            TaskListener listener = TaskListener.NULL;
-            ACL.impersonate(ACL.SYSTEM);
-
-            try {
+            StreamTaskListener listener = null;
+            try (ACLContext ctx = ACL.as2(ACL.SYSTEM2)) {
                 listener = new StreamTaskListener(getLogFile());
+                try {
+                    doRun(listener);
+                } finally {
+                    listener.close();
+                }
+            } catch (IOException ex) {
+                if (listener == null) {
+                    LOGGER.log(Level.SEVERE, "Cannot create listener for " + getName(), ex);
+                    //TODO: throw IllegalStateException?
+                } else {
+                    LOGGER.log(Level.WARNING, "Cannot close listener for " + getName(), ex);
+                }
+            }
+         }
 
+        /**
+         * Runs the monitor and encapsulates all errors within.
+         * @since 1.590
+         */
+        private void doRun(@NonNull TaskListener listener) {
+            try {
                 fix(listener);
-
             } catch (AbortException e) {
                 listener.error(e.getMessage());
             } catch (Throwable e) {
-                e.printStackTrace(listener.error(getName() + " failed"));
-                LOGGER.log(Level.WARNING, getName()+" failed", e);
+                Functions.printStackTrace(e, listener.error(getName() + " failed"));
+                LOGGER.log(Level.WARNING, getName() + " failed", e);
             }
         }
     }

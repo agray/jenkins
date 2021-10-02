@@ -24,11 +24,10 @@
 package hudson;
 
 import hudson.MarkupText.SubText;
-
-import java.util.List;
 import java.util.ArrayList;
-import java.util.regex.Pattern;
+import java.util.List;
 import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Common part between {@link MarkupText} and {@link MarkupText.SubText}.
@@ -72,8 +71,8 @@ public abstract class AbstractMarkupText {
      * Adds a start tag and end tag at the specified position.
      *
      * <p>
-     * For example, if the text was "abc", then <tt>addMarkup(1,2,"&lt;b>","&lt;/b>")</tt>
-     * would generate <tt>"a&lt;b>b&lt;/b>c"</tt>
+     * For example, if the text was "abc", then {@code addMarkup(1,2,"<b>","</b>")}
+     * would generate {@code "a<b>b</b>c"}
      */
     public abstract void addMarkup( int startPos, int endPos, String startTag, String endTag );
 
@@ -141,7 +140,7 @@ public abstract class AbstractMarkupText {
     public List<MarkupText.SubText> findTokens(Pattern pattern) {
         String text = getText();
         Matcher m = pattern.matcher(text);
-        List<SubText> r = new ArrayList<SubText>();
+        List<SubText> r = new ArrayList<>();
 
         while(m.find()) {
             int idx = m.start();

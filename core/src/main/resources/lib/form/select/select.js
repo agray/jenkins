@@ -4,8 +4,40 @@ function updateListBox(listBox,url,config) {
     config = config || {};
     config = object(config);
     var originalOnSuccess = config.onSuccess;
-    config.onSuccess = function(rsp) {
-        var l = $(listBox);
+    var l = $(listBox);
+
+    // Hacky function to retrofit compatibility with tables-to-divs
+    // If the <select> tag parent is a <td> element we can consider it's following a
+    // form entry using tables-to-divs markup.
+    function getStatusElement() {
+        function getStatusForTabularForms() {
+            return findFollowingTR(listBox, "validation-error-area").firstElementChild.nextSibling;
+        }
+        function getStatusForDivBasedForms() {
+            var settingMain = listBox.closest('.setting-main')
+            if (!settingMain) {
+                console.warn("Couldn't find the expected parent element (.setting-main) for element", listBox)
+                return;
+            }
+
+            return settingMain.nextElementSibling;
+        }
+
+        return listBox.parentNode.tagName === 'TD'
+            ? getStatusForTabularForms()
+            : getStatusForDivBasedForms();
+    }
+
+    var status = getStatusElement();
+    if (!status) {
+        console.warn("Couldn't find the expected status element")
+        return;
+    }
+    if (status.firstElementChild && status.firstElementChild.getAttribute('data-select-ajax-error')) {
+        status.innerHTML = "";
+    }
+    config.onSuccess = function (rsp) {
+        l.removeClassName("select-ajax-pending");
         var currentSelection = l.value;
 
         // clear the contents
@@ -30,17 +62,44 @@ function updateListBox(listBox,url,config) {
 
         if (originalOnSuccess!=undefined)
             originalOnSuccess(rsp);
-    },
-    config.onFailure = function(rsp) {
-        // deleting values can result in the data loss, so let's not do that
-//        var l = $(listBox);
-//        l.options[0] = null;
-    }
+    };
+    config.onFailure = function (rsp) {
+        l.removeClassName("select-ajax-pending");
+        status.innerHTML = rsp.responseText;
+        if (status.firstElementChild) {
+            status.firstElementChild.setAttribute('data-select-ajax-error', 'true')
+        }
+        Behaviour.applySubtree(status);
+        // deleting values can result in the data loss, so let's not do that unless instructed
+        var header = rsp.getResponseHeader('X-Jenkins-Select-Error');
+        if (header && "clear" === header.toLowerCase()) {
+            // clear the contents
+            while (l.length > 0)   l.options[0] = null;
+        }
 
+    };
+
+    l.addClassName("select-ajax-pending");
     new Ajax.Request(url, config);
 }
 
 Behaviour.specify("SELECT.select", 'select', 1000, function(e) {
+
+        function hasChanged(selectEl, originalValue) {
+            // seems like a race condition allows this to fire before the 'selectEl' is defined. If that happens, exit..
+            if(!selectEl || !selectEl.options || !selectEl.options.length > 0)
+              return false;
+            var firstValue = selectEl.options[0].value;
+            var selectedValue = selectEl.value;
+            if (originalValue == "" && selectedValue == firstValue) {
+                // There was no value pre-selected but after the call to updateListBox the first value is selected by
+                // default. This must not be considered a change.
+                return false;
+            } else {
+                return originalValue != selectedValue;
+            }
+        };
+
         // controls that this SELECT box depends on
         refillOnChange(e,function(params) {
             var value = e.value;
@@ -60,7 +119,9 @@ Behaviour.specify("SELECT.select", 'select', 1000, function(e) {
                     fireEvent(e,"filled"); // let other interested parties know that the items have changed
 
                     // if the update changed the current selection, others listening to this control needs to be notified.
-                    if (e.value!=value) fireEvent(e,"change");
+                    if (hasChanged(e, value)) {
+                        fireEvent(e,"change");
+                    }
                 }
             });
         });

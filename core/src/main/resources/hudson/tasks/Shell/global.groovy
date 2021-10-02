@@ -21,11 +21,11 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-package hudson.tasks.Shell;
+package hudson.tasks.Shell
 f=namespace(lib.FormTagLib)
 
 f.section(title:_("Shell")) {
-    f.entry(title:_("Shell executable"),help:"/help/shell/shellexe.html") {
-        f.textbox(name:"shell",value:descriptor.shell,checkUrl:"'${rootURL}/builder/Shell/check?value='+encodeURIComponent(this.value)")
+    f.entry(field: 'shell', title:_("Shell executable")) {
+        f.textbox()
     }
 }

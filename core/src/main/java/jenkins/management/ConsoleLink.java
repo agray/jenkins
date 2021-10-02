@@ -24,15 +24,17 @@
 
 package jenkins.management;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
 import hudson.model.ManagementLink;
 import hudson.security.Permission;
 import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
 
 /**
  * @author <a href="mailto:nicolas.deloof@gmail.com">Nicolas De Loof</a>
  */
-@Extension(ordinal = Integer.MAX_VALUE - 900)
+@Extension(ordinal = Integer.MAX_VALUE - 900) @Symbol("console")
 public class ConsoleLink extends ManagementLink {
 
     @Override
@@ -40,6 +42,7 @@ public class ConsoleLink extends ManagementLink {
         return "notepad.png";
     }
 
+    @Override
     public String getDisplayName() {
         return Messages.ConsoleLink_DisplayName();
     }
@@ -56,6 +59,12 @@ public class ConsoleLink extends ManagementLink {
 
     @Override
     public Permission getRequiredPermission() {
-        return Jenkins.RUN_SCRIPTS;
+        return Jenkins.ADMINISTER;
+    }
+
+    @NonNull
+    @Override
+    public Category getCategory() {
+        return Category.TOOLS;
     }
 }

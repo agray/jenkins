@@ -24,25 +24,32 @@
 package hudson.model;
 
 /**
- * Partial {@link Action} implementation that doesn't have any UI presence.
+ * Partial {@link Action} implementation that doesn't have any UI presence (unless the {@link #getUrlName()} is overrided).
  *
  * <p>
  * This class can be used as a convenient base class, when you use
  * {@link Action} for just storing data associated with a build.
  *
+ * <p>
+ * It could also be used to reduce the amount of code required to just create an accessible url for tests 
+ * by overriding the {@link #getUrlName()} method.
+ *
  * @author Kohsuke Kawaguchi
  * @since 1.188
  */
 public abstract class InvisibleAction implements Action {
+    @Override
     public final String getIconFileName() {
         return null;
     }
 
+    @Override
     public final String getDisplayName() {
         return null;
     }
 
-    public final String getUrlName() {
+    @Override
+    public String getUrlName() {
         return null;
     }
 }

@@ -4,13 +4,15 @@ import hudson.FilePath;
 import hudson.model.DownloadService.Downloadable;
 import hudson.model.Node;
 import hudson.model.TaskListener;
-import net.sf.json.JSONObject;
-
+import hudson.slaves.NodeSpecific;
 import java.io.IOException;
+import java.net.URL;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
-import java.net.URL;
+import net.sf.json.JSONObject;
 
 /**
  * Partial convenience implementation of {@link ToolInstaller} that just downloads
@@ -35,7 +37,7 @@ public abstract class DownloadFromUrlInstaller extends ToolInstaller {
     /**
      * Checks if the specified expected location already contains the installed version of the tool.
      *
-     * This check needs to run fairly efficiently. The current implementation uses the souce URL of {@link Installable},
+     * This check needs to run fairly efficiently. The current implementation uses the source URL of {@link Installable},
      * based on the assumption that released bits do not change its content.
      */
     protected boolean isUpToDate(FilePath expectedLocation, Installable i) throws IOException, InterruptedException {
@@ -55,6 +57,7 @@ public abstract class DownloadFromUrlInstaller extends ToolInstaller {
         return null;
     }
 
+    @Override
     public FilePath performInstallation(ToolInstallation tool, Node node, TaskListener log) throws IOException, InterruptedException {
         FilePath expected = preferredLocation(tool, node);
 
@@ -62,6 +65,10 @@ public abstract class DownloadFromUrlInstaller extends ToolInstaller {
         if(inst==null) {
             log.getLogger().println("Invalid tool ID "+id);
             return expected;
+        }
+
+        if (inst instanceof NodeSpecific) {
+            inst = (Installable) ((NodeSpecific) inst).forNode(node, log);
         }
 
         if(isUpToDate(expected,inst))
@@ -101,7 +108,7 @@ public abstract class DownloadFromUrlInstaller extends ToolInstaller {
      *
      * @return
      *      Return the real top directory inside {@code root} that contains the meat. In the above example,
-     *      <tt>root.child("jakarta-ant")</tt> should be returned. If there's no directory to pull up,
+     *      {@code root.child("jakarta-ant")} should be returned. If there's no directory to pull up,
      *      return null. 
      */
     protected FilePath findPullUpDirectory(FilePath root) throws IOException, InterruptedException {
@@ -114,15 +121,79 @@ public abstract class DownloadFromUrlInstaller extends ToolInstaller {
         return null;
     }
 
-    public static abstract class DescriptorImpl<T extends DownloadFromUrlInstaller> extends ToolInstallerDescriptor<T> {
+    public abstract static class DescriptorImpl<T extends DownloadFromUrlInstaller> extends ToolInstallerDescriptor<T> {
         
         @SuppressWarnings("deprecation") // intentionally adding dynamic item here
         protected DescriptorImpl() {
             Downloadable.all().add(createDownloadable());
         }
 
-        protected Downloadable createDownloadable() {
-            return new Downloadable(getId());
+        /**
+         * function that creates a {@link Downloadable}.
+         * @return a downloadable object
+         */
+        public Downloadable createDownloadable() {
+            final DescriptorImpl delegate = this;
+            return new Downloadable(getId()) {
+                @Override
+                public JSONObject reduce(List<JSONObject> jsonList) {
+                    if (isDefaultSchema(jsonList)) {
+                        return delegate.reduce(jsonList);
+                    } else {
+                        //if it's not default schema fall back to the super class implementation
+                        return super.reduce(jsonList);
+                    }
+                }
+            };
+        }
+
+        /**
+         * this function checks is the update center tool has the default schema
+         * @param jsonList the list of Update centers json files
+         * @return true if the schema is the default one (id, name, url), false otherwise
+         */
+        private boolean isDefaultSchema(List<JSONObject> jsonList) {
+            JSONObject jsonToolInstallerList = jsonList.get(0);
+            ToolInstallerList toolInstallerList = (ToolInstallerList) JSONObject.toBean(jsonToolInstallerList, ToolInstallerList.class);
+
+            if (toolInstallerList != null) {
+                ToolInstallerEntry[] entryList = toolInstallerList.list;
+                if (entryList != null) {
+                    ToolInstallerEntry sampleEntry = entryList[0];
+                    if (sampleEntry != null) {
+                        if (sampleEntry.id != null && sampleEntry.name != null && sampleEntry.url != null) {
+                            return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+
+        /**
+         * Merge a list of ToolInstallerList and removes duplicate tool installers (ie having the same id)
+         * @param jsonList the list of ToolInstallerList to merge
+         * @return the merged ToolInstallerList wrapped in a JSONObject
+         */
+        private JSONObject reduce(List<JSONObject> jsonList) {
+            List<ToolInstallerEntry> reducedToolEntries = new ArrayList<>();
+
+            HashSet<String> processedIds = new HashSet<>();
+            for (JSONObject jsonToolList : jsonList) {
+                ToolInstallerList toolInstallerList = (ToolInstallerList) JSONObject.toBean(jsonToolList, ToolInstallerList.class);
+                for(ToolInstallerEntry entry : toolInstallerList.list) {
+                    // being able to add the id into the processedIds set means this tool has not been processed before
+                    if (processedIds.add(entry.id)) {
+                        reducedToolEntries.add(entry);
+                    }
+                }
+            }
+
+            ToolInstallerList toolInstallerList = new ToolInstallerList();
+            toolInstallerList.list = new ToolInstallerEntry[reducedToolEntries.size()];
+            reducedToolEntries.toArray(toolInstallerList.list);
+            //return the list with no duplicates
+            return JSONObject.fromObject(toolInstallerList);
         }
 
         /**
@@ -130,6 +201,7 @@ public abstract class DownloadFromUrlInstaller extends ToolInstaller {
          * <p>
          * By default we use the fully-qualified class name of the {@link DownloadFromUrlInstaller} subtype.
          */
+        @Override
         public String getId() {
             return clazz.getName().replace('$','.');
         }
@@ -174,5 +246,18 @@ public abstract class DownloadFromUrlInstaller extends ToolInstaller {
          * URL.
          */
         public String url;
+    }
+
+    /**
+     * Convenient abstract class to implement a NodeSpecificInstallable based on an existing Installable
+     * @since 1.626
+     */
+    public abstract class NodeSpecificInstallable extends Installable implements NodeSpecific<NodeSpecificInstallable> {
+
+        public NodeSpecificInstallable(Installable inst) {
+            this.id = inst.id;
+            this.name = inst.name;
+            this.url = inst.url;
+        }
     }
 }

@@ -23,9 +23,8 @@
  */
 package hudson.scm;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.concurrent.ExecutionException;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 import hudson.FilePath;
 import hudson.Launcher;
@@ -36,23 +35,32 @@ import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
 import hudson.model.Node;
 import hudson.model.Result;
-
-import org.jvnet.hudson.test.Bug;
-import org.jvnet.hudson.test.HudsonTestCase;
+import java.io.File;
+import java.io.IOException;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class ScmTest extends HudsonTestCase {
+public class ScmTest {
+
+    @Rule
+    public JenkinsRule j = new JenkinsRule();
+
     /**
      * Makes sure that {@link SCM#processWorkspaceBeforeDeletion(AbstractProject, FilePath, Node)} is called
      * before a project deletion.
      */
-    @Bug(2271)
-    public void testProjectDeletionAndCallback() throws Exception {
-        FreeStyleProject p = createFreeStyleProject();
+    @Test
+    @Issue("JENKINS-2271")
+    public void projectDeletionAndCallback() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject();
         final boolean[] callback = new boolean[1];
         p.setScm(new NullSCM() {
+            @Override
             public boolean processWorkspaceBeforeDeletion(AbstractProject<?, ?> project, FilePath workspace, Node node) {
                 callback[0] = true;
                 return true;
@@ -66,10 +74,11 @@ public class ScmTest extends HudsonTestCase {
         p.delete();
         assertTrue(callback[0]);
     }
-    
-    @Bug(4605)
-    public void testAbortDuringCheckoutMarksBuildAsAborted() throws IOException, InterruptedException, ExecutionException {
-        FreeStyleProject p = createFreeStyleProject();
+
+    @Test
+    @Issue("JENKINS-4605")
+    public void abortDuringCheckoutMarksBuildAsAborted() throws Exception {
+        FreeStyleProject p = j.createFreeStyleProject();
         p.setScm(new NullSCM() {
             @Override
             public boolean checkout(AbstractBuild<?, ?> build,
@@ -78,12 +87,12 @@ public class ScmTest extends HudsonTestCase {
                     throws IOException, InterruptedException {
                 throw new InterruptedException();
             }
-            
+
             private Object writeReplace() { // don't really care about save
                 return new NullSCM();
             }
         });
-        
+
         FreeStyleBuild build = p.scheduleBuild2(0).get();
         assertEquals(Result.ABORTED, build.getResult());
     }

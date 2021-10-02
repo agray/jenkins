@@ -1,19 +1,26 @@
 package hudson.security;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
 import hudson.Functions;
 import hudson.model.Api;
 import hudson.model.UnprotectedRootAction;
-
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
-
+import java.util.Locale;
+import java.util.Set;
 import jenkins.model.Jenkins;
-
-import org.acegisecurity.Authentication;
-import org.acegisecurity.GrantedAuthority;
+import jenkins.util.MemoryReductionUtil;
+import org.jenkinsci.Symbol;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 import org.kohsuke.stapler.export.Exported;
 import org.kohsuke.stapler.export.ExportedBean;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 
 /**
  * Expose the data needed for /whoAmI, so it can be exposed by Api.
@@ -21,9 +28,14 @@ import org.kohsuke.stapler.export.ExportedBean;
  * @author Ryan Campbell
  *
  */
-@Extension
+@Extension @Symbol("whoAmI")
 @ExportedBean
 public class WhoAmI implements UnprotectedRootAction {
+    private static final Set<String> dangerousHeaders = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+            "cookie",
+            // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#Authentication
+            "authorization", "www-authenticate", "proxy-authenticate", "proxy-authorization"
+    )));
     
     public Api getApi() {
         return new Api(this);
@@ -44,30 +56,36 @@ public class WhoAmI implements UnprotectedRootAction {
         return Functions.isAnonymous();
     }
     
-    @Exported
+    // @Exported removed due to leak of sessionId with some SecurityRealm
     public String getDetails() {
         return auth().getDetails() != null ? auth().getDetails().toString() : null;
     }
     
-    @Exported
+    // @Exported removed due to leak of sessionId with some SecurityRealm
     public String getToString() {
         return auth().toString();
     }
 
-    private Authentication auth() {
-        return Jenkins.getAuthentication();
+    private @NonNull Authentication auth() {
+        return Jenkins.getAuthentication2();
     }
 
     @Exported
     public String[] getAuthorities() {
         if (auth().getAuthorities() == null) {
-            return new String[0];
+            return MemoryReductionUtil.EMPTY_STRING_ARRAY;
         }
-        List <String> authorities = new ArrayList<String>();
+        List <String> authorities = new ArrayList<>();
         for (GrantedAuthority a : auth().getAuthorities()) {
             authorities.add(a.getAuthority());
         }
-        return (String[]) authorities.toArray(new String[authorities.size()]);
+        return authorities.toArray(new String[0]);
+    }
+
+    // Used by Jelly
+    @Restricted(NoExternalUse.class)
+    public boolean isHeaderDangerous(@NonNull String name) {
+        return dangerousHeaders.contains(name.toLowerCase(Locale.ENGLISH));
     }
 
     @Override

@@ -28,8 +28,8 @@ import hudson.MarkupText;
 import hudson.console.ConsoleAnnotationDescriptor;
 import hudson.console.ConsoleAnnotator;
 import hudson.console.ConsoleNote;
-
 import java.util.regex.Pattern;
+import org.jenkinsci.Symbol;
 
 /**
  * Marks the log line that reports that Maven3 is executing a mojo.
@@ -57,12 +57,13 @@ public class Maven3MojoNote extends ConsoleNote {
         return null;
     }
 
-    @Extension
+    @Extension @Symbol("maven3Mojos")
     public static final class DescriptorImpl extends ConsoleAnnotationDescriptor {
+        @Override
         public String getDisplayName() {
             return "Maven 3 Mojos";
         }
     }
 
-    public static Pattern PATTERN = Pattern.compile("\\[INFO\\] --- .+-plugin:[^:]+:[^ ]+ \\(.+\\) @ .+ ---");
+    public static final Pattern PATTERN = Pattern.compile("\\[INFO\\] --- .+-plugin:[^:]+:[^ ]+ \\(.+\\) @ .+ ---");
 }

@@ -23,15 +23,16 @@
  */
 package hudson.util;
 
+import java.io.IOException;
 import java.io.OutputStream;
 import java.io.Writer;
-import java.io.IOException;
-import java.nio.charset.CharsetDecoder;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.CoderResult;
+import java.nio.CharBuffer;
 import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CoderResult;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.nio.charset.UnsupportedCharsetException;
-import java.nio.*;
 
 /**
  * {@link OutputStream} that writes to {@link Writer}
@@ -41,6 +42,7 @@ import java.nio.*;
  * @deprecated since 2008-05-28.
  *      Use the one in stapler.
  */
+@Deprecated
 public class WriterOutputStream extends OutputStream {
     private final Writer writer;
     private final CharsetDecoder decoder;
@@ -55,13 +57,15 @@ public class WriterOutputStream extends OutputStream {
         decoder.onUnmappableCharacter(CodingErrorAction.REPLACE);
     }
 
+    @Override
     public void write(int b) throws IOException {
         if(buf.remaining()==0)
             decode(false);
         buf.put((byte)b);
     }
 
-    public void write(byte b[], int off, int len) throws IOException {
+    @Override
+    public void write(byte[] b, int off, int len) throws IOException {
         while(len>0) {
             if(buf.remaining()==0)
                 decode(false);
@@ -72,6 +76,7 @@ public class WriterOutputStream extends OutputStream {
         }
     }
 
+    @Override
     public void flush() throws IOException {
         decode(false);
         flushOutput();
@@ -83,6 +88,7 @@ public class WriterOutputStream extends OutputStream {
         out.clear();
     }
 
+    @Override
     public void close() throws IOException {
         decode(true);
         flushOutput();
@@ -126,7 +132,7 @@ public class WriterOutputStream extends OutputStream {
             String encoding = System.getProperty("file.encoding");
             return Charset.forName(encoding);
         } catch (UnsupportedCharsetException e) {
-            return Charset.forName("UTF-8");
+            return StandardCharsets.UTF_8;
         }
     }
 }

@@ -23,13 +23,12 @@
  */
 package hudson.cli;
 
-import jenkins.model.Jenkins;
-import hudson.model.TopLevelItem;
 import hudson.Extension;
 import hudson.model.Item;
+import hudson.model.TopLevelItem;
+import jenkins.model.Jenkins;
 import jenkins.model.ModifiableTopLevelItemGroup;
 import org.kohsuke.args4j.Argument;
-
 
 /**
  * Copies a job from CLI.
@@ -49,12 +48,12 @@ public class CopyJobCommand extends CLICommand {
     @Argument(metaVar="DST",usage="Name of the new job to be created.",index=1,required=true)
     public String dst;
 
+    @Override
     protected int run() throws Exception {
-        Jenkins jenkins = Jenkins.getInstance();
+        Jenkins jenkins = Jenkins.get();
 
         if (jenkins.getItemByFullName(dst)!=null) {
-            stderr.println("Job '"+dst+"' already exists");
-            return -1;
+            throw new IllegalStateException("Job '"+dst+"' already exists");
         }
 
         ModifiableTopLevelItemGroup ig = jenkins;
@@ -69,7 +68,7 @@ public class CopyJobCommand extends CLICommand {
             if (item instanceof ModifiableTopLevelItemGroup) {
                 ig = (ModifiableTopLevelItemGroup) item;
             } else {
-                throw new IllegalArgumentException("Can't create job from CLI in " + group);
+                throw new IllegalStateException("Can't create job from CLI in " + group);
             }
             dst = dst.substring(i + 1);
         }
@@ -78,4 +77,3 @@ public class CopyJobCommand extends CLICommand {
         return 0;
     }
 }
-

@@ -23,11 +23,10 @@
  */
 package hudson.scm;
 
-import hudson.model.AbstractBuild;
-import org.xml.sax.SAXException;
-
+import hudson.model.Run;
 import java.io.File;
 import java.io.IOException;
+import org.xml.sax.SAXException;
 
 /**
  * {@link ChangeLogParser} for no SCM.
@@ -37,11 +36,11 @@ public class NullChangeLogParser extends ChangeLogParser {
     
     public static final NullChangeLogParser INSTANCE = new NullChangeLogParser();
     
-    public ChangeLogSet<? extends ChangeLogSet.Entry> parse(AbstractBuild build, File changelogFile) throws IOException, SAXException {
+    @Override public ChangeLogSet<? extends ChangeLogSet.Entry> parse(Run build, RepositoryBrowser<?> browser, File changelogFile) throws IOException, SAXException {
         return ChangeLogSet.createEmpty(build);
     }
     
-    public Object readResolve() {
+    protected Object readResolve() {
         return INSTANCE;
     }
 }

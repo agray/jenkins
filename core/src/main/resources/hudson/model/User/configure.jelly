@@ -27,15 +27,16 @@ THE SOFTWARE.
 -->
 <?jelly escape-by-default='true'?>
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form" xmlns:i="jelly:fmt">
-  <l:layout norefresh="true" permission="${app.ADMINISTER}" title="${%title(it.fullName)}">
+  <l:layout permission="${app.ADMINISTER}" title="${%title(it.fullName)}">
     <st:include page="sidepanel.jelly" />
     <l:main-panel>
       <f:form method="post" action="configSubmit" name="config">
+        <j:set var="instance" value="${it}"/>
         <f:entry title="${%Full name}" help="/help/user/fullName.html">
-          <f:textbox name="fullName" value="${it.fullName}" />
+          <f:textbox field="fullName"/>
         </f:entry>
         <f:entry title="${%Description}" help="/help/user/description.html">
-          <f:textarea name="description" value="${it.description}"/>
+          <f:textarea field="description"/>
         </f:entry>
 
         <!-- user property configurations -->

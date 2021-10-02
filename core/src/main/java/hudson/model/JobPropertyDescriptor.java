@@ -23,17 +23,16 @@
  */
 package hudson.model;
 
-import jenkins.model.Jenkins;
-import org.kohsuke.stapler.StaplerRequest;
-import org.jvnet.tiger_types.Types;
-
-import java.util.List;
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.lang.reflect.Type;
-import java.lang.reflect.ParameterizedType;
-
+import java.util.List;
+import jenkins.model.Jenkins;
+import jenkins.model.OptionalJobProperty;
 import net.sf.json.JSONObject;
+import org.jvnet.tiger_types.Types;
+import org.kohsuke.stapler.StaplerRequest;
 
 /**
  * {@link Descriptor} for {@link JobProperty}.
@@ -57,10 +56,8 @@ public abstract class JobPropertyDescriptor extends Descriptor<JobProperty<?>> {
     }
 
     /**
-     * {@inheritDoc}
-     *
      * @return
-     *      null to avoid setting an instance of {@link JobProperty} to the target project.
+     *      null to avoid setting an instance of {@link JobProperty} to the target project (or just use {@link OptionalJobProperty})
      */
     @Override
     public JobProperty<?> newInstance(StaplerRequest req, JSONObject formData) throws FormException {
@@ -76,8 +73,8 @@ public abstract class JobPropertyDescriptor extends Descriptor<JobProperty<?>> {
      * given job type.
      * 
      * <p>
-     * The default implementation of this method checks if the given job type is assignable to 'J' of
-     * {@link JobProperty}<tt>&lt;J></tt>, but subtypes can extend this to change this behavior.
+     * The default implementation of this method checks if the given job type is assignable to {@code J} of
+     * {@link JobProperty}{@code <J>}, but subtypes can extend this to change this behavior.
      *
      * @return
      *      true to indicate applicable, in which case the property will be
@@ -90,7 +87,7 @@ public abstract class JobPropertyDescriptor extends Descriptor<JobProperty<?>> {
             Class applicable = Types.erasure(Types.getTypeArgument(pt, 0));
             return applicable.isAssignableFrom(jobType);
         } else {
-            throw new AssertionError(clazz+" doesn't properly parameterize JobProperty. The isApplicable() method must be overriden.");
+            throw new AssertionError(clazz+" doesn't properly parameterize JobProperty. The isApplicable() method must be overridden.");
         }
     }
 
@@ -98,7 +95,7 @@ public abstract class JobPropertyDescriptor extends Descriptor<JobProperty<?>> {
      * Gets the {@link JobPropertyDescriptor}s applicable for a given job type.
      */
     public static List<JobPropertyDescriptor> getPropertyDescriptors(Class<? extends Job> clazz) {
-        List<JobPropertyDescriptor> r = new ArrayList<JobPropertyDescriptor>();
+        List<JobPropertyDescriptor> r = new ArrayList<>();
         for (JobPropertyDescriptor p : all())
             if(p.isApplicable(clazz))
                 r.add(p);
@@ -106,6 +103,6 @@ public abstract class JobPropertyDescriptor extends Descriptor<JobProperty<?>> {
     }
 
     public static Collection<JobPropertyDescriptor> all() {
-        return (Collection) Jenkins.getInstance().getDescriptorList(JobProperty.class);
+        return (Collection) Jenkins.get().getDescriptorList(JobProperty.class);
     }
 }

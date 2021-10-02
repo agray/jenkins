@@ -23,39 +23,49 @@
  */
 package hudson.model;
 
-import jenkins.model.Jenkins;
-import jenkins.security.SecureRequester;
-
-import org.dom4j.CharacterData;
-import org.dom4j.Document;
-import org.dom4j.DocumentException;
-import org.dom4j.DocumentFactory;
-import org.dom4j.Element;
-import org.dom4j.io.SAXReader;
-import org.dom4j.io.XMLWriter;
-import org.kohsuke.stapler.QueryParameter;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
-import org.kohsuke.stapler.export.*;
-import org.kohsuke.stapler.export.TreePruner.ByDepth;
-
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletResponse;
-import javax.xml.transform.stream.StreamResult;
+import hudson.ExtensionList;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.net.HttpURLConnection;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletResponse;
+import javax.xml.transform.stream.StreamResult;
+import jenkins.model.Jenkins;
+import jenkins.security.SecureRequester;
+import jenkins.util.xml.FilteredFunctionContext;
+import org.dom4j.CharacterData;
+import org.dom4j.Document;
+import org.dom4j.DocumentException;
+import org.dom4j.DocumentFactory;
+import org.dom4j.Element;
+import org.dom4j.XPath;
+import org.dom4j.io.SAXReader;
+import org.dom4j.io.XMLWriter;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
+import org.kohsuke.stapler.QueryParameter;
+import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerResponse;
+import org.kohsuke.stapler.export.Exported;
+import org.kohsuke.stapler.export.Flavor;
+import org.kohsuke.stapler.export.Model;
+import org.kohsuke.stapler.export.ModelBuilder;
+import org.kohsuke.stapler.export.NamedPathPruner;
+import org.kohsuke.stapler.export.SchemaGenerator;
+import org.kohsuke.stapler.export.TreePruner;
+import org.kohsuke.stapler.export.TreePruner.ByDepth;
 
 /**
  * Used to expose remote access API for ".../api/"
  *
  * <p>
- * If the parent object has a <tt>_api.jelly</tt> view, it will be included
+ * If the parent object has a {@code _api.jelly} view, it will be included
  * in the api index page.
  *
  * @author Kohsuke Kawaguchi
@@ -72,10 +82,12 @@ public class Api extends AbstractModelObject {
         this.bean = bean;
     }
 
+    @Override
     public String getDisplayName() {
         return "API";
     }
 
+    @Override
     public String getSearchUrl() {
         return "api";
     }
@@ -102,18 +114,20 @@ public class Api extends AbstractModelObject {
 
         // first write to String
         Model p = MODEL_BUILDER.get(bean.getClass());
-        TreePruner pruner = (tree!=null) ? new NamedPathPruner(tree) : new ByDepth(1 - depth);
+        TreePruner pruner = tree != null ? new NamedPathPruner(tree) : new ByDepth(1 - depth);
         p.writeTo(bean,pruner,Flavor.XML.createDataWriter(bean,sw));
 
         // apply XPath
+        FilteredFunctionContext functionContext = new FilteredFunctionContext();
         Object result;
         try {
             Document dom = new SAXReader().read(new StringReader(sw.toString()));
-
             // apply exclusions
             if (excludes!=null) {
                 for (String exclude : excludes) {
-                    List<org.dom4j.Node> list = (List<org.dom4j.Node>)dom.selectNodes(exclude);
+                    XPath xExclude = dom.createXPath(exclude);
+                    xExclude.setFunctionContext(functionContext);
+                    List<org.dom4j.Node> list = xExclude.selectNodes(dom);
                     for (org.dom4j.Node n : list) {
                         Element parent = n.getParent();
                         if(parent!=null)
@@ -125,8 +139,22 @@ public class Api extends AbstractModelObject {
             if(xpath==null) {
             	result = dom;
             } else {
-                List list = dom.selectNodes(xpath);
+                XPath comp = dom.createXPath(xpath);
+                comp.setFunctionContext(functionContext);
+                List list = comp.selectNodes(dom);
+
                 if (wrapper!=null) {
+                    // check if the wrapper is a valid entity name
+                    // First position:  letter or underscore
+                    // Other positions: \w (letter, number, underscore), dash or dot
+                    String validNameRE = "^[a-zA-Z_][\\w-\\.]*$";
+
+                    if(!wrapper.matches(validNameRE)) {
+                        rsp.setStatus(HttpServletResponse.SC_BAD_REQUEST);
+                        rsp.getWriter().print(Messages.Api_WrapperParamInvalid());
+                        return;
+                    }
+
                     Element root = DocumentFactory.getInstance().createElement(wrapper);
                     for (Object o : list) {
                         if (o instanceof String) {
@@ -162,21 +190,18 @@ public class Api extends AbstractModelObject {
         }
 
         // switch to gzipped output
-        OutputStream o = rsp.getCompressedOutputStream(req);
-        try {
+        try (OutputStream o = rsp.getCompressedOutputStream(req)) {
             if (isSimpleOutput(result)) {
                 // simple output allowed
                 rsp.setContentType("text/plain;charset=UTF-8");
                 String text = result instanceof CharacterData ? ((CharacterData) result).getText() : result.toString();
-                o.write(text.getBytes("UTF-8"));
+                o.write(text.getBytes(StandardCharsets.UTF_8));
                 return;
             }
 
             // otherwise XML
             rsp.setContentType("application/xml;charset=UTF-8");
             new XMLWriter(o).write(result);
-        } finally {
-            o.close();
         }
     }
 
@@ -201,7 +226,7 @@ public class Api extends AbstractModelObject {
     public void doJson(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
         if (req.getParameter("jsonp") == null || permit(req)) {
             setHeaders(rsp);
-            rsp.serveExposedBean(req,bean, Flavor.JSON);
+            rsp.serveExposedBean(req,bean, req.getParameter("jsonp") == null ? Flavor.JSON : Flavor.JSONP);
         } else {
             rsp.sendError(HttpURLConnection.HTTP_FORBIDDEN, "jsonp forbidden; implement jenkins.security.SecureRequester");
         }
@@ -216,7 +241,7 @@ public class Api extends AbstractModelObject {
     }
 
     private boolean permit(StaplerRequest req) {
-        for (SecureRequester r : Jenkins.getInstance().getExtensionList(SecureRequester.class)) {
+        for (SecureRequester r : ExtensionList.lookup(SecureRequester.class)) {
             if (r.permit(req, bean)) {
                 return true;
             }
@@ -224,9 +249,14 @@ public class Api extends AbstractModelObject {
         return false;
     }
 
-    private void setHeaders(StaplerResponse rsp) {
+    @Restricted(NoExternalUse.class)
+    protected void setHeaders(StaplerResponse rsp) {
         rsp.setHeader("X-Jenkins", Jenkins.VERSION);
         rsp.setHeader("X-Jenkins-Session", Jenkins.SESSION_HASH);
+        // to be really defensive against dumb browsers not taking into consideration the content-type being set
+        rsp.setHeader("X-Content-Type-Options", "nosniff");
+        // recommended by OWASP: https://cheatsheetseries.owasp.org/cheatsheets/REST_Security_Cheat_Sheet.html#security-headers
+        rsp.setHeader("X-Frame-Options", "deny");
     }
 
     private static final Logger LOGGER = Logger.getLogger(Api.class.getName());

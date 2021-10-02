@@ -26,15 +26,14 @@ package hudson.model;
 import com.thoughtworks.xstream.converters.basic.AbstractSingleValueConverter;
 import hudson.Util;
 import hudson.security.ACL;
-import jenkins.model.Jenkins;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
-
 import java.io.IOException;
 import javax.servlet.http.HttpServletResponse;
+import jenkins.model.Jenkins;
 import jenkins.security.ApiTokenProperty;
-import org.acegisecurity.AccessDeniedException;
 import org.kohsuke.stapler.HttpResponses;
+import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerResponse;
+import org.springframework.security.access.AccessDeniedException;
 
 /**
  * Authorization token to allow projects to trigger themselves under the secured environment.
@@ -45,6 +44,7 @@ import org.kohsuke.stapler.HttpResponses;
  *      Use {@link ACL} and {@link Item#BUILD}. This code is only here
  *      for the backward compatibility.
  */
+@Deprecated
 public final class BuildAuthorizationToken {
     private final String token;
 
@@ -63,12 +63,11 @@ public final class BuildAuthorizationToken {
     }
 
     @Deprecated public static void checkPermission(AbstractProject<?,?> project, BuildAuthorizationToken token, StaplerRequest req, StaplerResponse rsp) throws IOException {
-        Job<?,?> j = project;
-        checkPermission(j, token, req, rsp);
+        checkPermission((Job<?,?>) project, token, req, rsp);
     }
 
     public static void checkPermission(Job<?,?> project, BuildAuthorizationToken token, StaplerRequest req, StaplerResponse rsp) throws IOException {
-        if (!Jenkins.getInstance().isUseSecurity())
+        if (!Jenkins.get().isUseSecurity())
             return;    // everyone is authorized
 
         if(token!=null && token.token != null) {
@@ -100,10 +99,12 @@ public final class BuildAuthorizationToken {
     }
 
     public static final class ConverterImpl extends AbstractSingleValueConverter {
+        @Override
         public boolean canConvert(Class type) {
             return type== BuildAuthorizationToken.class;
         }
 
+        @Override
         public Object fromString(String str) {
             return new BuildAuthorizationToken(str);
         }

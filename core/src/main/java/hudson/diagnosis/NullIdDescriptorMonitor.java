@@ -23,21 +23,21 @@
  */
 package hudson.diagnosis;
 
+import static hudson.init.InitMilestone.EXTENSIONS_AUGMENTED;
+
 import hudson.Extension;
 import hudson.PluginWrapper;
 import hudson.init.Initializer;
 import hudson.model.AdministrativeMonitor;
 import hudson.model.Descriptor;
-import jenkins.model.Jenkins;
-
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-
-import static hudson.init.InitMilestone.EXTENSIONS_AUGMENTED;
+import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
 
 /**
  * Some old descriptors apparently has the getId() method that's used in different ways
@@ -46,10 +46,15 @@ import static hudson.init.InitMilestone.EXTENSIONS_AUGMENTED;
  * @author Kohsuke Kawaguchi
  * @since 1.402
  */
-@Extension
+@Extension @Symbol("nullId")
 public class NullIdDescriptorMonitor extends AdministrativeMonitor {
 
-    private final List<Descriptor> problems = new ArrayList<Descriptor>();
+    @Override
+    public String getDisplayName() {
+        return Messages.NullIdDescriptorMonitor_DisplayName();
+    }
+
+    private final List<Descriptor> problems = new ArrayList<>();
 
     @Override
     public boolean isActivated() {
@@ -60,8 +65,9 @@ public class NullIdDescriptorMonitor extends AdministrativeMonitor {
         return Collections.unmodifiableList(problems);
     }
 
-    private void verify() {
-        Jenkins h = Jenkins.getInstance();
+    @Initializer(after=EXTENSIONS_AUGMENTED)
+    public void verify() {
+        Jenkins h = Jenkins.get();
         for (Descriptor d : h.getExtensionList(Descriptor.class)) {
             PluginWrapper p = h.getPluginManager().whichPlugin(d.getClass());
             String id;
@@ -79,11 +85,6 @@ public class NullIdDescriptorMonitor extends AdministrativeMonitor {
                 problems.add(d);
             }
         }
-    }
-
-    @Initializer(after=EXTENSIONS_AUGMENTED)
-    public static void verifyId() {
-        AdministrativeMonitor.all().get(NullIdDescriptorMonitor.class).verify();
     }
 
     private static final Logger LOGGER = Logger.getLogger(NullIdDescriptorMonitor.class.getName());

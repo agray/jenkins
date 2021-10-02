@@ -23,24 +23,30 @@
  */
 package hudson.cli;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static java.util.logging.Level.FINE;
 
+import java.io.ByteArrayInputStream;
 import java.io.Console;
 import java.io.DataInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.Paths;
 import java.security.GeneralSecurityException;
-import java.security.KeyFactory;
+import java.security.InvalidKeyException;
 import java.security.KeyPair;
-import java.security.spec.DSAPrivateKeySpec;
-import java.security.spec.DSAPublicKeySpec;
+import java.security.spec.InvalidKeySpecException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.logging.Logger;
-
-import com.trilead.ssh2.crypto.PEMDecoder;
+import java.util.stream.StreamSupport;
+import org.apache.sshd.common.config.keys.FilePasswordProvider;
+import org.apache.sshd.common.util.io.resource.PathResource;
+import org.apache.sshd.common.util.security.SecurityUtils;
 
 /**
  * Read DSA or RSA key from file(s) asking for password interactively.
@@ -50,7 +56,7 @@ import com.trilead.ssh2.crypto.PEMDecoder;
  */
 public class PrivateKeyProvider {
 
-    private List<KeyPair> privateKeys = new ArrayList<KeyPair>();
+    private final List<KeyPair> privateKeys = new ArrayList<>();
 
     /**
      * Get keys read so far.
@@ -68,7 +74,7 @@ public class PrivateKeyProvider {
     /**
      * Read keys from default keyFiles
      *
-     * <tt>.ssh/id_rsa</tt>, <tt>.ssh/id_dsa</tt> and <tt>.ssh/identity</tt>.
+     * {@code .ssh/id_rsa}, {@code .ssh/id_dsa} and {@code .ssh/identity}.
      *
      * @return true if some key was read successfully.
      */
@@ -84,10 +90,7 @@ public class PrivateKeyProvider {
 
                 readFrom(key);
                 read = true;
-            } catch (IOException e) {
-
-                LOGGER.log(FINE, "Failed to load " + key, e);
-            } catch (GeneralSecurityException e) {
+            } catch (IOException | GeneralSecurityException e) {
 
                 LOGGER.log(FINE, "Failed to load " + key, e);
             }
@@ -127,35 +130,29 @@ public class PrivateKeyProvider {
     }
 
     private static String readPemFile(File f) throws IOException{
-        FileInputStream is = new FileInputStream(f);
-        try {
-            DataInputStream dis = new DataInputStream(is);
+        try (InputStream is = Files.newInputStream(f.toPath());
+             DataInputStream dis = new DataInputStream(is)) {
             byte[] bytes = new byte[(int) f.length()];
             dis.readFully(bytes);
-            dis.close();
             return new String(bytes);
-        } finally {
-            is.close();
+        } catch (InvalidPathException e) {
+            throw new IOException(e);
         }
     }
 
     public static KeyPair loadKey(String pemString, String passwd) throws IOException, GeneralSecurityException {
-        Object key = PEMDecoder.decode(pemString.toCharArray(), passwd);
-        if (key instanceof com.trilead.ssh2.signature.RSAPrivateKey) {
-            com.trilead.ssh2.signature.RSAPrivateKey x = (com.trilead.ssh2.signature.RSAPrivateKey)key;
-
-            return x.toJCEKeyPair();
+        Iterable<KeyPair> itr = SecurityUtils.loadKeyPairIdentities(null,
+                new PathResource(Paths.get("key")),
+                new ByteArrayInputStream(pemString.getBytes(UTF_8)),
+                FilePasswordProvider.of(passwd));
+        long numLoaded = itr == null ? 0 : StreamSupport.stream(itr.spliterator(), false).count();
+        if (numLoaded <= 0) {
+            throw new InvalidKeyException("Unsupported private key file format: key");
         }
-        if (key instanceof com.trilead.ssh2.signature.DSAPrivateKey) {
-            com.trilead.ssh2.signature.DSAPrivateKey x = (com.trilead.ssh2.signature.DSAPrivateKey)key;
-            KeyFactory kf = KeyFactory.getInstance("DSA");
-
-            return new KeyPair(
-                    kf.generatePublic(new DSAPublicKeySpec(x.getY(), x.getP(), x.getQ(), x.getG())),
-                    kf.generatePrivate(new DSAPrivateKeySpec(x.getX(), x.getP(), x.getQ(), x.getG())));
+        if (numLoaded != 1) {
+            throw new InvalidKeySpecException("Multiple private key pairs N/A: key");
         }
-
-        throw new UnsupportedOperationException("Unrecognizable key format: " + key);
+        return itr.iterator().next();
     }
 
     private static final Logger LOGGER = Logger.getLogger(PrivateKeyProvider.class.getName());

@@ -28,17 +28,15 @@ import hudson.DescriptorExtensionList;
 import hudson.ExtensionPoint;
 import hudson.model.AbstractDescribableImpl;
 import hudson.model.Descriptor;
-
 import java.io.IOException;
 import java.io.OutputStream;
 import jenkins.model.Jenkins;
-
 
 /**
  * Extension point for adding Captcha Support to User Registration Page {@link CaptchaSupport}.
  *
  * <p>
- * This object can have an optional <tt>config.jelly</tt> to configure the Captcha Support
+ * This object can have an optional {@code config.jelly} to configure the Captcha Support
  * <p>
  * A default constructor is needed to create CaptchaSupport in
  * the default configuration.
@@ -52,13 +50,14 @@ public abstract class CaptchaSupport extends AbstractDescribableImpl<CaptchaSupp
      * Returns all the registered {@link CaptchaSupport} descriptors.
      */
     public static DescriptorExtensionList<CaptchaSupport, Descriptor<CaptchaSupport>> all() {
-        return Jenkins.getInstance().<CaptchaSupport, Descriptor<CaptchaSupport>>getDescriptorList(CaptchaSupport.class);
+        return Jenkins.get().getDescriptorList(CaptchaSupport.class);
     }
     
-    abstract public  boolean validateCaptcha(String id, String text); 
+    public abstract boolean validateCaptcha(String id, String text);
     
-    abstract public void generateImage(String id, OutputStream ios) throws IOException;
+    public abstract void generateImage(String id, OutputStream ios) throws IOException;
 
+    @Override
     public CaptchaSupportDescriptor getDescriptor() {
         return (CaptchaSupportDescriptor)super.getDescriptor();
     }

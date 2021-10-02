@@ -29,7 +29,7 @@ THE SOFTWARE.
     The nested property type must be Describable and it needs to have config.jelly.
     ]]>
 
-    <st:attribute name="field" use="required">
+    <st:attribute name="field">
       Used for the data binding.
     </st:attribute>
     <st:attribute name="addCaption">
@@ -61,11 +61,11 @@ THE SOFTWARE.
       to nominate additional variables and their values to be captured for descriptors.
     </st:attribute>
   </st:documentation>
-
+  <f:prepareDatabinding />
   <!--
       first try getFooBarDescriptors() then fall back to automatic inference by type
   -->
-  <f:hetero-list name="${attrs.field}" items="${instance[attrs.field]}"
+  <f:hetero-list name="${field}" items="${instance[attrs.field]}"
                  descriptors="${descriptor[attrs.field+'Descriptors'] ?: descriptor.getPropertyType(instance,attrs.field).getApplicableItemDescriptors()}"
                  addCaption="${attrs.addCaption}" deleteCaption="${attrs.deleteCaption}"
                  hasHeader="${attrs.hasHeader}" honorOrder="${attrs.honorOrder}"

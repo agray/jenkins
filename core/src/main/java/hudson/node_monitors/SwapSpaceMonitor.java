@@ -23,20 +23,20 @@
  */
 package hudson.node_monitors;
 
-import hudson.Util;
 import hudson.Extension;
 import hudson.Functions;
+import hudson.Util;
 import hudson.model.Computer;
+import java.io.IOException;
 import jenkins.model.Jenkins;
-import hudson.remoting.Callable;
+import jenkins.security.MasterToSlaveCallable;
 import net.sf.json.JSONObject;
+import org.jenkinsci.Symbol;
 import org.jvnet.hudson.MemoryMonitor;
 import org.jvnet.hudson.MemoryUsage;
 import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.export.ExportedBean;
 import org.kohsuke.stapler.export.Exported;
-
-import java.io.IOException;
+import org.kohsuke.stapler.export.ExportedBean;
 
 /**
  * Checks the swap space availability.
@@ -77,16 +77,28 @@ public class SwapSpaceMonitor extends NodeMonitor {
     @Override
     public String getColumnCaption() {
         // Hide this column from non-admins
-        return Jenkins.getInstance().hasPermission(Jenkins.ADMINISTER) ? super.getColumnCaption() : null;
+        return Jenkins.get().hasPermission(Jenkins.ADMINISTER) ? super.getColumnCaption() : null;
     }
 
-    @Extension
-    public static final AbstractNodeMonitorDescriptor<MemoryUsage> DESCRIPTOR = new AbstractAsyncNodeMonitorDescriptor<MemoryUsage>() {
+    /**
+     * @deprecated as of 2.0
+     *      use injection
+     */
+    @Deprecated
+    public static /*almost final*/ AbstractNodeMonitorDescriptor<MemoryUsage> DESCRIPTOR;
+
+    @Extension @Symbol("swapSpace")
+    public static class DescriptorImpl extends AbstractAsyncNodeMonitorDescriptor<MemoryUsage> {
+        public DescriptorImpl() {
+            DESCRIPTOR = this;
+        }
+
         @Override
         protected MonitorTask createCallable(Computer c) {
             return new MonitorTask();
         }
 
+        @Override
         public String getDisplayName() {
             return Messages.SwapSpaceMonitor_DisplayName();
         }
@@ -95,12 +107,13 @@ public class SwapSpaceMonitor extends NodeMonitor {
         public NodeMonitor newInstance(StaplerRequest req, JSONObject formData) throws FormException {
             return new SwapSpaceMonitor();
         }
-    };
+    }
 
     /**
      * Obtains the string that represents the architecture.
      */
-    private static class MonitorTask implements Callable<MemoryUsage,IOException> {
+    private static class MonitorTask extends MasterToSlaveCallable<MemoryUsage,IOException> {
+        @Override
         public MemoryUsage call() throws IOException {
             MemoryMonitor mm;
             try {

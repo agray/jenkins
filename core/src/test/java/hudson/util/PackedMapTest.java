@@ -1,31 +1,33 @@
 package hudson.util;
 
-import junit.framework.TestCase;
+import static org.junit.Assert.assertEquals;
 
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.TreeMap;
+import org.junit.Test;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class PackedMapTest extends TestCase {
+public class PackedMapTest {
+
     static class Holder {
         PackedMap pm;
     }
 
     private XStream2 xs = new XStream2();
 
-    public void testBasic() throws Exception {
-        Map<String,String> o = new TreeMap<String, String>();
+    @Test
+    public void basic() {
+        Map<String,String> o = new TreeMap<>();
         o.put("a","b");
         o.put("c","d");
 
         PackedMap<String,String> p = PackedMap.of(o);
         assertEquals("b",p.get("a"));
         assertEquals("d", p.get("c"));
-        assertEquals(p.size(),2);
-        for (Entry<String,String> e : p.entrySet()) {
+        assertEquals(2, p.size());
+        for (Map.Entry<String,String> e : p.entrySet()) {
             System.out.println(e.getKey()+'='+e.getValue());
         }
 

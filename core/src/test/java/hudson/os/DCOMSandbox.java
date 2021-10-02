@@ -1,12 +1,11 @@
 package hudson.os;
 
+import java.util.Properties;
 import ndr.NdrObject;
 import ndr.NetworkDataRepresentation;
 import org.jinterop.dcom.transport.JIComTransportFactory;
 import rpc.Endpoint;
 import rpc.Stub;
-
-import java.util.Properties;
 
 /**
  * My attempt to see if ServerAlive calls can be used to detect an authentication failure
@@ -14,14 +13,14 @@ import java.util.Properties;
  * creating an instance.
  *
  * <p>
- * It turns out that the bogus credential works with ServerAlive.  The protocol specification
- * <http://download.microsoft.com/download/a/e/6/ae6e4142-aa58-45c6-8dcf-a657e5900cd3/%5BMS-DCOM%5D.pdf>
+ * It turns out that the bogus credential works with ServerAlive.  The
+ * <a href="http://download.microsoft.com/download/a/e/6/ae6e4142-aa58-45c6-8dcf-a657e5900cd3/%5BMS-DCOM%5D.pdf">protocol specification</a>
  * explicitly says this RPC must not check the credential.
  *
  * <p>
  * The feature in question of Windows is called "ForceGuest", and it's recorded in the registry at
  * HKLM\SYSTEM\CurrentControlSet\Control\LSA\forceguest (0=classic, 1=forceguest).
- * <http://support.microsoft.com/kb/290403>
+ * <a href="http://support.microsoft.com/kb/290403">KB 290403</a>
  *
  * @author Kohsuke Kawaguchi
  */
@@ -42,11 +41,12 @@ public class DCOMSandbox {
                 defaults.put("rpc.connectionContext","rpc.security.ntlm.NtlmConnectionContext");
         }
 
+        @Override
         protected String getSyntax() {
             return "99fcfec4-5260-101b-bbcb-00aa0021347a:0.0";
         }
 
-        public JIComOxidStub(String address, String domain, String username, String password) {
+        JIComOxidStub(String address, String domain, String username, String password) {
             setTransportFactory(JIComTransportFactory.getSingleTon());
             setProperties(new Properties(defaults));
             getProperties().setProperty("rpc.security.username", username);
@@ -64,14 +64,17 @@ public class DCOMSandbox {
     static class ServerAlive extends NdrObject {
         // see http://www.hsc.fr/ressources/articles/win_net_srv/rpcss_dcom_interfaces.html
 
+        @Override
         public int getOpnum() {
             return 3;
         }
 
+        @Override
         public void write(NetworkDataRepresentation ndr) {
             // no parameter
         }
 
+        @Override
         public void read(NetworkDataRepresentation ndr) {
             System.out.println("Got " + ndr.readUnsignedLong());
         }

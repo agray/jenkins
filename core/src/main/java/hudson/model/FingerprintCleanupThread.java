@@ -24,13 +24,14 @@
 package hudson.model;
 
 import hudson.Extension;
-import jenkins.model.Jenkins;
-
-import java.io.File;
-import java.io.FileFilter;
-import java.io.IOException;
-import java.util.logging.Level;
-import java.util.regex.Pattern;
+import hudson.ExtensionList;
+import java.util.logging.Logger;
+import jenkins.fingerprints.FileFingerprintStorage;
+import jenkins.fingerprints.FingerprintStorage;
+import jenkins.fingerprints.GlobalFingerprintConfiguration;
+import org.jenkinsci.Symbol;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * Scans the fingerprint database and remove old records
@@ -42,13 +43,17 @@ import java.util.regex.Pattern;
  *
  * @author Kohsuke Kawaguchi
  */
-@Extension
-public final class FingerprintCleanupThread extends AsyncPeriodicWork {
+@Extension @Symbol("fingerprintCleanup")
+@Restricted(NoExternalUse.class)
+public class FingerprintCleanupThread extends AsyncPeriodicWork {
+
+    private static final Logger LOGGER = Logger.getLogger(FingerprintCleanupThread.class.getName());
 
     public FingerprintCleanupThread() {
         super("Fingerprint cleanup");
     }
 
+    @Override
     public long getRecurrencePeriod() {
         return DAY;
     }
@@ -58,76 +63,25 @@ public final class FingerprintCleanupThread extends AsyncPeriodicWork {
     }
 
     private static FingerprintCleanupThread getInstance() {
-        return Jenkins.getInstance().getExtensionList(AsyncPeriodicWork.class).get(FingerprintCleanupThread.class);
+        return ExtensionList.lookup(AsyncPeriodicWork.class).get(FingerprintCleanupThread.class);
     }
 
+    /**
+     * Initiates the cleanup of fingerprints IF enabled.
+     * In case of configured external storage, the file system based storage cleanup is also performed.
+     */
+    @Override
     public void execute(TaskListener listener) {
-        int numFiles = 0;
-
-        File root = new File(Jenkins.getInstance().getRootDir(),"fingerprints");
-        File[] files1 = root.listFiles(LENGTH2DIR_FILTER);
-        if(files1!=null) {
-            for (File file1 : files1) {
-                File[] files2 = file1.listFiles(LENGTH2DIR_FILTER);
-                for(File file2 : files2) {
-                    File[] files3 = file2.listFiles(FINGERPRINTFILE_FILTER);
-                    for(File file3 : files3) {
-                        if(check(file3))
-                            numFiles++;
-                    }
-                    deleteIfEmpty(file2);
-                }
-                deleteIfEmpty(file1);
-            }
+        if (GlobalFingerprintConfiguration.get().isFingerprintCleanupDisabled()) {
+            LOGGER.fine("Fingerprint cleanup is disabled. Skipping execution");
+            return;
         }
+        FingerprintStorage.get().iterateAndCleanupFingerprints(listener);
 
-        logger.log(Level.INFO, "Cleaned up "+numFiles+" records");
-    }
-
-    /**
-     * Deletes a directory if it's empty.
-     */
-    private void deleteIfEmpty(File dir) {
-        String[] r = dir.list();
-        if(r==null)     return; // can happen in a rare occasion
-        if(r.length==0)
-            dir.delete();
-    }
-
-    /**
-     * Examines the file and returns true if a file was deleted.
-     */
-    private boolean check(File fingerprintFile) {
-        try {
-            Fingerprint fp = Fingerprint.load(fingerprintFile);
-            if (fp == null || !fp.isAlive()) {
-                logger.fine("deleting obsolete " + fingerprintFile);
-                fingerprintFile.delete();
-                return true;
-            } else {
-                // get the fingerprint in the official map so have the changes visible to Jenkins
-                // otherwise the mutation made in FingerprintMap can override our trimming.
-                logger.finer("possibly trimming " + fingerprintFile);
-                fp = Jenkins.getInstance()._getFingerprint(fp.getHashString());
-                return fp.trim();
-            }
-        } catch (IOException e) {
-            logger.log(Level.WARNING, "Failed to process "+fingerprintFile, e);
-            return false;
+        if (!(FingerprintStorage.get() instanceof FileFingerprintStorage) &&
+                FingerprintStorage.getFileFingerprintStorage().isReady()) {
+            FingerprintStorage.getFileFingerprintStorage().iterateAndCleanupFingerprints(listener);
         }
     }
 
-    private static final FileFilter LENGTH2DIR_FILTER = new FileFilter() {
-        public boolean accept(File f) {
-            return f.isDirectory() && f.getName().length()==2;
-        }
-    };
-
-    private static final FileFilter FINGERPRINTFILE_FILTER = new FileFilter() {
-        private final Pattern PATTERN = Pattern.compile("[0-9a-f]{28}\\.xml");
-
-        public boolean accept(File f) {
-            return f.isFile() && PATTERN.matcher(f.getName()).matches();
-        }
-    };
 }

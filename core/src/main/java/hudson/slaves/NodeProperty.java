@@ -23,39 +23,41 @@
  */
 package hudson.slaves;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.DescriptorExtensionList;
 import hudson.EnvVars;
 import hudson.ExtensionPoint;
 import hudson.FilePath;
 import hudson.Launcher;
-import hudson.DescriptorExtensionList;
+import hudson.model.AbstractBuild;
+import hudson.model.BuildListener;
 import hudson.model.Descriptor.FormException;
+import hudson.model.Environment;
+import hudson.model.Node;
 import hudson.model.Queue.BuildableItem;
+import hudson.model.Queue.Task;
 import hudson.model.ReconfigurableDescribable;
 import hudson.model.TaskListener;
 import hudson.model.queue.CauseOfBlockage;
 import hudson.scm.SCM;
-import hudson.model.AbstractBuild;
-import hudson.model.BuildListener;
-import hudson.model.Environment;
-import jenkins.model.Jenkins;
-import hudson.model.Node;
-import hudson.model.Queue;
-import hudson.model.Queue.Task;
-import net.sf.json.JSONObject;
-import org.kohsuke.stapler.StaplerRequest;
-
+import hudson.tools.PropertyDescriptor;
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-import javax.annotation.Nonnull;
+import jenkins.model.Jenkins;
+import net.sf.json.JSONObject;
+import org.kohsuke.stapler.StaplerRequest;
 
 /**
  * Extensible property of {@link Node}.
  *
  * <p>
- * Plugins can contribute this extension point to add additional data or UI actions to {@link Node}.
+ * Plugins can contribute this extension point to add additional data to {@link Node}.
  * {@link NodeProperty}s show up in the configuration screen of a node, and they are persisted with the {@link Node} object.
+ * 
+ * <p>
+ * To add UI action to {@link Node}s, i.e. a new link shown in the left side menu on a node page ({@code ./computer/<a node>}), see instead {@link hudson.model.TransientComputerActionFactory}.
  *
  *
  * <h2>Views</h2>
@@ -80,20 +82,22 @@ public abstract class NodeProperty<N extends Node> implements ReconfigurableDesc
 
     protected void setNode(N node) { this.node = node; }
 
+    @Override
     public NodePropertyDescriptor getDescriptor() {
-        return (NodePropertyDescriptor) Jenkins.getInstance().getDescriptorOrDie(getClass());
+        return (NodePropertyDescriptor) Jenkins.get().getDescriptorOrDie(getClass());
     }
 
     /**
      * Called by the {@link Node} to help determine whether or not it should
      * take the given task. Individual properties can return a non-null value
      * here if there is some reason the given task should not be run on its
-     * associated node. By default, this method returns <code>null</code>.
+     * associated node. By default, this method returns {@code null}.
      *
      * @since 1.360
      * @deprecated as of 1.413
-     *      Use {@link #canTake(Queue.BuildableItem)}
+     *      Use {@link #canTake(BuildableItem)}
      */
+    @Deprecated
     public CauseOfBlockage canTake(Task task) {
         return null;
     }
@@ -102,7 +106,7 @@ public abstract class NodeProperty<N extends Node> implements ReconfigurableDesc
      * Called by the {@link Node} to help determine whether or not it should
      * take the given task. Individual properties can return a non-null value
      * here if there is some reason the given task should not be run on its
-     * associated node. By default, this method returns <code>null</code>.
+     * associated node. By default, this method returns {@code null}.
      *
      * @since 1.413
      */
@@ -157,16 +161,17 @@ public abstract class NodeProperty<N extends Node> implements ReconfigurableDesc
      * @param env
      *      Manipulate this variable (normally by adding more entries.)
      *      Note that this is an override, so it doesn't contain environment variables that are
-     *      currently set for the slave process itself.
+     *      currently set for the agent process itself.
      * @param listener
      *      Can be used to send messages.
      *
      * @since 1.489
      */
-    public void buildEnvVars(@Nonnull EnvVars env, @Nonnull TaskListener listener) throws IOException,InterruptedException {
+    public void buildEnvVars(@NonNull EnvVars env, @NonNull TaskListener listener) throws IOException,InterruptedException {
         // default is no-op
     }
 
+    @Override
     public NodeProperty<?> reconfigure(StaplerRequest req, JSONObject form) throws FormException {
         return form==null ? null : getDescriptor().newInstance(req, form);
     }
@@ -175,7 +180,7 @@ public abstract class NodeProperty<N extends Node> implements ReconfigurableDesc
      * Lists up all the registered {@link NodeDescriptor}s in the system.
      */
     public static DescriptorExtensionList<NodeProperty<?>,NodePropertyDescriptor> all() {
-        return (DescriptorExtensionList) Jenkins.getInstance().getDescriptorList(NodeProperty.class);
+        return (DescriptorExtensionList) Jenkins.get().getDescriptorList(NodeProperty.class);
     }
 
     /**
@@ -183,6 +188,6 @@ public abstract class NodeProperty<N extends Node> implements ReconfigurableDesc
      * given project.
      */
     public static List<NodePropertyDescriptor> for_(Node node) {
-        return NodePropertyDescriptor.for_(all(),node);
+        return PropertyDescriptor.for_(all(),node);
     }
 }

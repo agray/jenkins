@@ -23,6 +23,7 @@
  */
 package hudson.model;
 
+import com.google.common.collect.Maps;
 import hudson.Extension;
 import hudson.ExtensionPoint;
 import hudson.model.Queue.Task;
@@ -30,10 +31,11 @@ import hudson.model.queue.MappingWorksheet;
 import hudson.model.queue.MappingWorksheet.ExecutorChunk;
 import hudson.model.queue.MappingWorksheet.Mapping;
 import hudson.util.ConsistentHash;
-import hudson.util.ConsistentHash.Hash;
-
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Strategy that decides which {@link Task} gets run on which {@link Executor}.
@@ -77,15 +79,17 @@ public abstract class LoadBalancer implements ExtensionPoint {
         @Override
         public Mapping map(Task task, MappingWorksheet ws) {
             // build consistent hash for each work chunk
-            List<ConsistentHash<ExecutorChunk>> hashes = new ArrayList<ConsistentHash<ExecutorChunk>>(ws.works.size());
+            List<ConsistentHash<ExecutorChunk>> hashes = new ArrayList<>(ws.works.size());
             for (int i=0; i<ws.works.size(); i++) {
-                ConsistentHash<ExecutorChunk> hash = new ConsistentHash<ExecutorChunk>(new Hash<ExecutorChunk>() {
-                    public String hash(ExecutorChunk node) {
-                        return node.getName();
-                    }
-                });
-                for (ExecutorChunk ec : ws.works(i).applicableExecutorChunks())
-                    hash.add(ec,ec.size()*100);
+                ConsistentHash<ExecutorChunk> hash = new ConsistentHash<>(ExecutorChunk::getName);
+
+                // Build a Map to pass in rather than repeatedly calling hash.add() because each call does lots of expensive work
+                List<ExecutorChunk> chunks = ws.works(i).applicableExecutorChunks();
+                Map<ExecutorChunk, Integer> toAdd = Maps.newHashMapWithExpectedSize(chunks.size());
+                for (ExecutorChunk ec : chunks) {
+                    toAdd.put(ec, ec.size()*100);
+                }
+                hash.addAll(toAdd);
 
                 hashes.add(hash);
             }
@@ -104,7 +108,15 @@ public abstract class LoadBalancer implements ExtensionPoint {
         private boolean assignGreedily(Mapping m, Task task, List<ConsistentHash<ExecutorChunk>> hashes, int i) {
             if (i==hashes.size())   return true;    // fully assigned
 
-            String key = task.getFullDisplayName() + (i>0 ? String.valueOf(i) : "");
+            String key;
+            try {
+                key = task.getAffinityKey();
+            } catch (RuntimeException e) {
+                LOGGER.log(Level.FINE, null, e);
+                // Default implementation of Queue.Task.getAffinityKey, we assume it doesn't fail.
+                key = task.getFullDisplayName();
+            }
+            key += i > 0 ? String.valueOf(i) : "";
 
             for (ExecutorChunk ec : hashes.get(i).list(key)) {
                 // let's attempt this assignment
@@ -128,6 +140,7 @@ public abstract class LoadBalancer implements ExtensionPoint {
      * @deprecated as of 1.377
      *      The only implementation in the core now is the one based on consistent hash.
      */
+    @Deprecated
     public static final LoadBalancer DEFAULT = CONSISTENT_HASH;
 
 
@@ -140,7 +153,7 @@ public abstract class LoadBalancer implements ExtensionPoint {
         return new LoadBalancer() {
             @Override
             public Mapping map(Task task, MappingWorksheet worksheet) {
-                if (Queue.ifBlockedByHudsonShutdown(task)) {
+                if (Queue.isBlockedByShutdown(task)) {
                     // if we are quieting down, don't start anything new so that
                     // all executors will be eventually free.
                     return null;
@@ -157,5 +170,7 @@ public abstract class LoadBalancer implements ExtensionPoint {
             }
         };
     }
+
+    private static final Logger LOGGER = Logger.getLogger(LoadBalancer.class.getName());
 
 }

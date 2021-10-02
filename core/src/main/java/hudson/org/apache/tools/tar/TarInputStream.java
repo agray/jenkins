@@ -23,22 +23,27 @@
 
 package hudson.org.apache.tools.tar;
 
-import org.apache.tools.tar.TarBuffer;
-import org.apache.tools.tar.TarEntry;
-
+import hudson.RestrictedSince;
+import java.io.ByteArrayOutputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.ByteArrayOutputStream;
+import org.apache.tools.tar.TarBuffer;
+import org.apache.tools.tar.TarEntry;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * The TarInputStream reads a UNIX tar archive as an InputStream.
  * methods are provided to position at each successive entry in
  * the archive, and the read each entry as a normal input stream
  * using read().
- *
+ * @deprecated Use {@link org.apache.commons.compress.archivers.tar.TarArchiveInputStream} instead
  */
+@Deprecated
+@Restricted(NoExternalUse.class)
+@RestrictedSince("2.200")
 public class TarInputStream extends FilterInputStream {
 
     // CheckStyle:VisibilityModifier OFF - bc
@@ -52,7 +57,7 @@ public class TarInputStream extends FilterInputStream {
 
     /**
      * This contents of this array is not used at all in this class,
-     * it is only here to avoid repreated object creation during calls
+     * it is only here to avoid repeated object creation during calls
      * to the no-arg read method.
      */
     protected byte[] oneBuf;
@@ -106,6 +111,7 @@ public class TarInputStream extends FilterInputStream {
      * Closes this stream. Calls the TarBuffer's close() method.
      * @throws IOException on error
      */
+    @Override
     public void close() throws IOException {
         this.buffer.close();
     }
@@ -125,12 +131,13 @@ public class TarInputStream extends FilterInputStream {
      * is left in the entire archive, only in the current entry.
      * This value is determined from the entry's size header field
      * and the amount of data already read from the current entry.
-     * Integer.MAX_VALUE is returen in case more than Integer.MAX_VALUE
+     * Integer.MAX_VALUE is returned in case more than Integer.MAX_VALUE
      * bytes are left in the current entry in the archive.
      *
      * @return The number of available bytes for the current entry.
      * @throws IOException for signature
      */
+    @Override
     public int available() throws IOException {
         if (this.entrySize - this.entryOffset > Integer.MAX_VALUE) {
             return Integer.MAX_VALUE;
@@ -148,6 +155,7 @@ public class TarInputStream extends FilterInputStream {
      * @return the number actually skipped
      * @throws IOException on error
      */
+    @Override
     public long skip(long numToSkip) throws IOException {
         // REVIEW
         // This is horribly inefficient, but it ensures that we
@@ -163,7 +171,7 @@ public class TarInputStream extends FilterInputStream {
             }
             skip -= numRead;
         }
-        return (numToSkip - skip);
+        return numToSkip - skip;
     }
 
     /**
@@ -171,6 +179,7 @@ public class TarInputStream extends FilterInputStream {
      *
      * @return False.
      */
+    @Override
     public boolean markSupported() {
         return false;
     }
@@ -180,12 +189,14 @@ public class TarInputStream extends FilterInputStream {
      *
      * @param markLimit The limit to mark.
      */
+    @Override
     public void mark(int markLimit) {
     }
 
     /**
      * Since we do not support marking just yet, we do nothing.
      */
+    @Override
     public void reset() {
     }
 
@@ -245,7 +256,7 @@ public class TarInputStream extends FilterInputStream {
             this.currEntry = new TarEntry(headerBuf);
 
             if (this.debug) {
-                System.err.println("TarInputStream: SET CURRENTRY '"
+                System.err.println("TarInputStream: SET currENTRY '"
                         + this.currEntry.getName()
                         + "' size = "
                         + this.currEntry.getSize());
@@ -290,6 +301,7 @@ public class TarInputStream extends FilterInputStream {
      * @return The byte read, or -1 at EOF.
      * @throws IOException on error
      */
+    @Override
     public int read() throws IOException {
         int num = this.read(this.oneBuf, 0, 1);
         return num == -1 ? -1 : ((int) this.oneBuf[0]) & 0xFF;
@@ -308,6 +320,7 @@ public class TarInputStream extends FilterInputStream {
      * @return The number of bytes read, or -1 at EOF.
      * @throws IOException on error
      */
+    @Override
     public int read(byte[] buf, int offset, int numToRead) throws IOException {
         int totalRead = 0;
 
@@ -315,13 +328,12 @@ public class TarInputStream extends FilterInputStream {
             return -1;
         }
 
-        if ((numToRead + this.entryOffset) > this.entrySize) {
+        if (numToRead + this.entryOffset > this.entrySize) {
             numToRead = (int) (this.entrySize - this.entryOffset);
         }
 
         if (this.readBuf != null) {
-            int sz = (numToRead > this.readBuf.length) ? this.readBuf.length
-                    : numToRead;
+            int sz = Math.min(numToRead, this.readBuf.length);
 
             System.arraycopy(this.readBuf, 0, buf, offset, sz);
 

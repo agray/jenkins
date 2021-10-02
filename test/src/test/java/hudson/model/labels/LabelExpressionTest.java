@@ -23,79 +23,95 @@
  */
 package hudson.model.labels;
 
+import static org.hamcrest.CoreMatchers.instanceOf;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+import static org.junit.Assume.assumeFalse;
+
 import antlr.ANTLRException;
+import hudson.Functions;
 import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.BuildListener;
 import hudson.model.FreeStyleBuild;
 import hudson.model.FreeStyleProject;
-import hudson.model.FreeStyleProject.DescriptorImpl;
 import hudson.model.Label;
 import hudson.model.Node.Mode;
 import hudson.slaves.DumbSlave;
 import hudson.slaves.RetentionStrategy;
-import org.jvnet.hudson.test.Bug;
-import org.jvnet.hudson.test.HudsonTestCase;
-import org.jvnet.hudson.test.SequenceLock;
-import org.jvnet.hudson.test.TestBuilder;
-
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.util.Collections;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.SequenceLock;
+import org.jvnet.hudson.test.TestBuilder;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class LabelExpressionTest extends HudsonTestCase {
+public class LabelExpressionTest {
+
+    @Rule
+    public JenkinsRule j = new JenkinsRule();
+
     /**
      * Verifies the queueing behavior in the presence of the expression.
      */
-    public void testQueueBehavior() throws Exception {
-        DumbSlave w32 = createSlave("win 32bit",null);
-        DumbSlave w64 = createSlave("win 64bit",null);
-        createSlave("linux 32bit",null);
+    @Test
+    public void queueBehavior1() throws Exception {
+        DumbSlave w32 = j.createSlave("win 32bit", null);
+        DumbSlave w64 = j.createSlave("win 64bit", null);
+        j.createSlave("linux 32bit", null);
 
         final SequenceLock seq = new SequenceLock();
 
-        FreeStyleProject p1 = createFreeStyleProject();
+        FreeStyleProject p1 = j.createFreeStyleProject();
         p1.getBuildersList().add(new TestBuilder() {
+            @Override
             public boolean perform(AbstractBuild<?, ?> build, Launcher launcher, BuildListener listener) throws InterruptedException, IOException {
-                seq.phase(0); // first, make sure the w32 slave is occupied
+                seq.phase(0); // first, make sure the w32 agent is occupied
                 seq.phase(2);
                 seq.done();
                 return true;
             }
         });
-        p1.setAssignedLabel(jenkins.getLabel("win && 32bit"));
+        p1.setAssignedLabel(j.jenkins.getLabel("win && 32bit"));
 
-        FreeStyleProject p2 = createFreeStyleProject();
-        p2.setAssignedLabel(jenkins.getLabel("win && 32bit"));
+        FreeStyleProject p2 = j.createFreeStyleProject();
+        p2.setAssignedLabel(j.jenkins.getLabel("win && 32bit"));
 
-        FreeStyleProject p3 = createFreeStyleProject();
-        p3.setAssignedLabel(jenkins.getLabel("win"));
+        FreeStyleProject p3 = j.createFreeStyleProject();
+        p3.setAssignedLabel(j.jenkins.getLabel("win"));
 
         Future<FreeStyleBuild> f1 = p1.scheduleBuild2(0);
 
-        seq.phase(1); // we schedule p2 build after w32 slave is occupied
+        seq.phase(1); // we schedule p2 build after w32 agent is occupied
         Future<FreeStyleBuild> f2 = p2.scheduleBuild2(0);
 
         Thread.sleep(1000); // time window to ensure queue has tried to assign f2 build
 
         // p3 is tied to 'win', so even though p1 is busy, this should still go ahead and complete
-        FreeStyleBuild b3 = assertBuildStatusSuccess(p3.scheduleBuild2(0));
+        FreeStyleBuild b3 = j.assertBuildStatusSuccess(p3.scheduleBuild2(0));
         assertSame(w64,b3.getBuiltOn());
 
         seq.phase(3);   // once we confirm that p3 build is over, we let p1 proceed
 
         // p1 should have been built on w32
-        FreeStyleBuild b1 = assertBuildStatusSuccess(f1);
+        FreeStyleBuild b1 = j.assertBuildStatusSuccess(f1);
         assertSame(w32,b1.getBuiltOn());
 
         // and so is p2
-        FreeStyleBuild b2 = assertBuildStatusSuccess(f2);
+        FreeStyleBuild b2 = j.assertBuildStatusSuccess(f2);
         assertSame(w32,b2.getBuiltOn());
     }
 
@@ -103,42 +119,44 @@ public class LabelExpressionTest extends HudsonTestCase {
      * Push the build around to different nodes via the assignment
      * to make sure it gets where we need it to.
      */
-    public void testQueueBehavior2() throws Exception {
-        DumbSlave s = createSlave("win",null);
+    @Test
+    public void queueBehavior2() throws Exception {
+        DumbSlave s = j.createSlave("win", null);
 
-        FreeStyleProject p = createFreeStyleProject();
+        FreeStyleProject p = j.createFreeStyleProject();
 
-        p.setAssignedLabel(jenkins.getLabel("!win"));
-        FreeStyleBuild b = assertBuildStatusSuccess(p.scheduleBuild2(0));
-        assertSame(jenkins,b.getBuiltOn());
+        p.setAssignedLabel(j.jenkins.getLabel("!win"));
+        FreeStyleBuild b = j.assertBuildStatusSuccess(p.scheduleBuild2(0));
+        assertSame(j.jenkins,b.getBuiltOn());
 
-        p.setAssignedLabel(jenkins.getLabel("win"));
-        b = assertBuildStatusSuccess(p.scheduleBuild2(0));
+        p.setAssignedLabel(j.jenkins.getLabel("win"));
+        b = j.assertBuildStatusSuccess(p.scheduleBuild2(0));
         assertSame(s,b.getBuiltOn());
 
-        p.setAssignedLabel(jenkins.getLabel("!win"));
-        b = assertBuildStatusSuccess(p.scheduleBuild2(0));
-        assertSame(jenkins,b.getBuiltOn());
+        p.setAssignedLabel(j.jenkins.getLabel("!win"));
+        b = j.assertBuildStatusSuccess(p.scheduleBuild2(0));
+        assertSame(j.jenkins,b.getBuiltOn());
     }
 
     /**
-     * Make sure we can reset the label of an existing slave.
+     * Make sure we can reset the label of an existing agent.
      */
-    public void testSetLabelString() throws Exception {
-        DumbSlave s = createSlave("foo","",null);
+    @Test
+    public void setLabelString() throws Exception {
+        DumbSlave s = j.createSlave("foo", "", null);
 
-        assertSame(s.getLabelString(), "");
-        
+        assertSame("", s.getLabelString());
+
         s.setLabelString("bar");
 
-        assertSame(s.getLabelString(), "bar");
-
+        assertSame("bar", s.getLabelString());
     }
 
     /**
      * Tests the expression parser.
      */
-    public void testParser() throws Exception {
+    @Test
+    public void parser1() throws Exception {
         parseAndVerify("foo", "foo");
         parseAndVerify("32bit.dot", "32bit.dot");
         parseAndVerify("foo||bar", "foo || bar");
@@ -148,39 +166,54 @@ public class LabelExpressionTest extends HudsonTestCase {
         parseAndVerify("foo||(bar&&zot)", "foo||(bar&&zot)");
 
         parseAndVerify("(foo||bar)&&zot", "(foo||bar)&&zot");
+        parseAndVerify("(foo||bar)&&zot", "  ( foo || bar )  && zot");
         parseAndVerify("foo->bar", "foo ->\tbar");
+        parseAndVerify("foo->bar", "foo -> bar");
+        parseAndVerify("foo->bar", "   foo \t\t ->   bar \t ");
         parseAndVerify("!foo<->bar", "!foo <-> bar");
     }
 
-    @Bug(8537)
-    public void testParser2() throws Exception {
+    @Issue("JENKINS-8537")
+    @Test
+    public void parser2() throws Exception {
         parseAndVerify("aaa&&bbb&&ccc","aaa&&bbb&&ccc");
     }
 
     private void parseAndVerify(String expected, String expr) throws ANTLRException {
-        assertEquals(expected, LabelExpression.parseExpression(expr).getName());
+        assertEquals(expected, Label.parseExpression(expr).getName());
     }
 
-    public void testParserError() throws Exception {
+    @Test
+    public void parserError() throws Exception {
         parseShouldFail("foo bar");
         parseShouldFail("foo (bar)");
+        parseShouldFail("foo(bar)");
+        parseShouldFail("a <- b");
+        parseShouldFail("a -< b");
+        parseShouldFail("a - b");
+        parseShouldFail("->");
+        parseShouldFail("-<");
+        parseShouldFail("-!");
     }
 
-    public void testLaxParsing() {
+    @Test
+    public void laxParsing() {
         // this should parse as an atom
-        LabelAtom l = (LabelAtom) jenkins.getLabel("lucene.zones.apache.org (Solaris 10)");
-        assertEquals(l.getName(),"lucene.zones.apache.org (Solaris 10)");
-        assertEquals(l.getExpression(),"\"lucene.zones.apache.org (Solaris 10)\"");
+        LabelAtom l = (LabelAtom) j.jenkins.getLabel("lucene.zones.apache.org (Solaris 10)");
+        assertEquals("lucene.zones.apache.org (Solaris 10)", l.getName());
+        assertEquals("\"lucene.zones.apache.org (Solaris 10)\"", l.getExpression());
     }
 
-    public void testDataCompatibilityWithHostNameWithWhitespace() throws Exception {
-        DumbSlave slave = new DumbSlave("abc def (xyz) : test", "dummy",
-                createTmpDir().getPath(), "1", Mode.NORMAL, "", createComputerLauncher(null), RetentionStrategy.NOOP, Collections.EMPTY_LIST);
-        jenkins.addNode(slave);
+    @Test
+    public void dataCompatibilityWithHostNameWithWhitespace() throws Exception {
+        assumeFalse("Windows can't have paths with colons, skipping", Functions.isWindows());
+        DumbSlave slave = new DumbSlave("abc def (xyz) test", "dummy",
+                j.createTmpDir().getPath(), "1", Mode.NORMAL, "", j.createComputerLauncher(null), RetentionStrategy.NOOP, Collections.EMPTY_LIST);
+        j.jenkins.addNode(slave);
 
 
-        FreeStyleProject p = createFreeStyleProject();
-        p.setAssignedLabel(jenkins.getLabel("abc def"));
+        FreeStyleProject p = j.createFreeStyleProject();
+        p.setAssignedLabel(j.jenkins.getLabel("abc def"));
         assertEquals("abc def",p.getAssignedLabel().getName());
         assertEquals("\"abc def\"",p.getAssignedLabel().getExpression());
 
@@ -194,54 +227,155 @@ public class LabelExpressionTest extends HudsonTestCase {
         assertEquals("a:b c",p.getAssignedLabel().getName());
     }
 
-    public void testQuote() {
-        Label l = jenkins.getLabel("\"abc\\\\\\\"def\"");
+    @Test
+    public void quote() {
+        Label l = j.jenkins.getLabel("\"abc\\\\\\\"def\"");
         assertEquals("abc\\\"def",l.getName());
-        
-        l = jenkins.getLabel("label1||label2"); // create label expression
-        l = jenkins.getLabel("\"label1||label2\"");
+
+        l = j.jenkins.getLabel("label1||label2"); // create label expression
+        l = j.jenkins.getLabel("\"label1||label2\"");
         assertEquals("label1||label2",l.getName());
     }
 
     /**
      * The name should have parenthesis at the right place to preserve the tree structure.
      */
-    public void testComposite() {
-        LabelAtom x = jenkins.getLabelAtom("x");
+    @Test
+    public void composite() {
+        LabelAtom x = j.jenkins.getLabelAtom("x");
         assertEquals("!!x",x.not().not().getName());
         assertEquals("(x||x)&&x",x.or(x).and(x).getName());
         assertEquals("x&&x||x",x.and(x).or(x).getName());
     }
 
-    public void testDash() {
-        jenkins.getLabelAtom("solaris-x86");
+    @Test
+    public void dash() {
+        j.jenkins.getLabelAtom("solaris-x86");
+    }
+
+    @Test
+    public void expression_atom_simple() throws Exception {
+        Label label = Label.parseExpression("a");
+        assertThat(label, instanceOf(LabelAtom.class));
+    }
+
+    @Test
+    public void expression_atom_simpleLonger() throws Exception {
+        Label label = Label.parseExpression("abc123def");
+        assertThat(label, instanceOf(LabelAtom.class));
+    }
+
+    @Test
+    public void expression_atom_withDash() throws Exception {
+        Label label = Label.parseExpression("a-b");
+        assertThat(label, instanceOf(LabelAtom.class));
+    }
+
+    @Test
+    @Issue("JENKINS-66613")
+    public void expression_atom_withDashes() throws Exception {
+        Label label = Label.parseExpression("--a----b-c-");
+        assertThat(label, instanceOf(LabelAtom.class));
+    }
+
+    @Test
+    @Issue("JENKINS-66613")
+    public void expression_atom_doubleDash() throws Exception {
+        assertEquals(new LabelAtom("--"), Label.parseExpression("--"));
+    }
+
+    @Test
+    @Issue("JENKINS-66613")
+    public void expression_atom_dashBeforeImplies() throws Exception {
+        assertEquals(new LabelAtom("a-").implies(new LabelAtom("b")), Label.parseExpression("a-->b"));
+    }
+
+    @Test
+    @Issue("JENKINS-66613")
+    public void expression_atom_dashAfterImplies() throws Exception {
+        assertEquals(new LabelAtom("a").implies(new LabelAtom("-b")), Label.parseExpression("a->-b"));
+    }
+
+    @Test
+    @Issue("JENKINS-66613")
+    public void expression_atom_justDash() throws Exception {
+        assertEquals(new LabelAtom("-"), Label.parseExpression("-"));
+    }
+
+    @Test
+    @Issue("JENKINS-66613")
+    public void expression_atom_dashBefore() throws Exception {
+        assertEquals(new LabelAtom("-1"), Label.parseExpression("-1"));
+    }
+
+    @Test
+    @Issue("JENKINS-66613")
+    public void expression_atom_dashAround() throws Exception {
+        assertEquals(new LabelAtom("-abc-"), Label.parseExpression("-abc-"));
+    }
+
+    @Test
+    public void expression_implies() throws Exception {
+        Label label = Label.parseExpression("a -> b");
+        assertThat(label, instanceOf(LabelExpression.Implies.class));
+    }
+
+    @Test
+    @Issue("JENKINS-66613")
+    public void expression_implies_withoutSpaces() throws Exception {
+        Label label = Label.parseExpression("a->b");
+        assertThat(label, instanceOf(LabelExpression.Implies.class));
+    }
+
+    @Test
+    public void expression_and() throws Exception {
+        Label label = Label.parseExpression("a && b");
+        assertThat(label, instanceOf(LabelExpression.And.class));
+    }
+
+    @Test
+    public void expression_and_withoutSpaces() throws Exception {
+        Label label = Label.parseExpression("a&&b");
+        assertThat(label, instanceOf(LabelExpression.And.class));
     }
 
     private void parseShouldFail(String expr) {
         try {
-            LabelExpression.parseExpression(expr);
+            Label.parseExpression(expr);
             fail(expr + " should fail to parse");
         } catch (ANTLRException e) {
             // expected
         }
     }
 
-    public void testFormValidation() throws Exception {
-        executeOnServer(new Callable<Object>() {
+    @Test
+    public void formValidation() throws Exception {
+        j.executeOnServer(new Callable<Object>() {
+            @Override
             public Object call() throws Exception {
-                DescriptorImpl d = jenkins.getDescriptorByType(DescriptorImpl.class);
-
-                Label l = jenkins.getLabel("foo");
-                DumbSlave s = createSlave(l);
-                String msg = d.doCheckAssignedLabelString(null, "goo").renderHtml();
+                Label l = j.jenkins.getLabel("foo");
+                DumbSlave s = j.createSlave(l);
+                String msg = LabelExpression.validate("goo").renderHtml();
                 assertTrue(msg.contains("foo"));
                 assertTrue(msg.contains("goo"));
 
-                msg = d.doCheckAssignedLabelString(null, "master && goo").renderHtml();
+                msg = LabelExpression.validate("built-in && goo").renderHtml();
                 assertTrue(msg.contains("foo"));
                 assertTrue(msg.contains("goo"));
                 return null;
             }
         });
+    }
+
+    @Test
+    public void parseLabel() throws Exception {
+        Set<LabelAtom> result = Label.parse("one two three");
+        String[] expected = {"one", "two", "three"};
+
+        for(String e : expected) {
+            assertTrue(result.contains(new LabelAtom(e)));
+        }
+
+        assertEquals(result.size(), expected.length);
     }
 }

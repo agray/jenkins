@@ -24,20 +24,19 @@
  */
 package hudson.util;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.FilePath;
 import hudson.Launcher;
 import hudson.Util;
-
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Arrays;
-import java.util.Map;
-import java.util.BitSet;
-import java.util.Properties;
-import java.util.Map.Entry;
-import java.io.Serializable;
 import java.io.File;
 import java.io.IOException;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.BitSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
 import java.util.Set;
 
 /**
@@ -46,7 +45,7 @@ import java.util.Set;
  * @author Kohsuke Kawaguchi
  */
 public class ArgumentListBuilder implements Serializable, Cloneable {
-    private final List<String> args = new ArrayList<String>();
+    private final List<String> args = new ArrayList<>();
     /**
      * Bit mask indicating arguments that shouldn't be echoed-back (e.g., password)
      */
@@ -133,6 +132,16 @@ public class ArgumentListBuilder implements Serializable, Cloneable {
         }
         return this;
     }
+    
+    /**
+     * @since 2.72
+     */
+    public ArgumentListBuilder add(@NonNull Iterable<String> args) {
+        for (String arg : args) {
+            add(arg);
+        }
+        return this;
+    }
 
     /**
      * Decomposes the given token into multiple arguments by splitting via whitespace.
@@ -148,18 +157,18 @@ public class ArgumentListBuilder implements Serializable, Cloneable {
      */
     public ArgumentListBuilder addKeyValuePair(String prefix, String key, String value, boolean mask) {
         if(key==null) return this;
-        add(((prefix==null)?"-D":prefix)+key+'='+value, mask);
+        add((prefix == null ? "-D" : prefix) + key + '=' + value, mask);
         return this;
     }
 
     /**
      * Adds key value pairs as "-Dkey=value -Dkey=value ..."
      *
-     * <tt>-D</tt> portion is configurable as the 'prefix' parameter.
+     * {@code -D} portion is configurable as the 'prefix' parameter.
      * @since 1.114
      */
     public ArgumentListBuilder addKeyValuePairs(String prefix, Map<String,String> props) {
-        for (Entry<String,String> e : props.entrySet())
+        for (Map.Entry<String,String> e : props.entrySet())
             addKeyValuePair(prefix, e.getKey(), e.getValue(), false);
         return this;
     }
@@ -177,8 +186,8 @@ public class ArgumentListBuilder implements Serializable, Cloneable {
      * @since 1.378
      */
     public ArgumentListBuilder addKeyValuePairs(String prefix, Map<String,String> props, Set<String> propsToMask) {
-        for (Entry<String,String> e : props.entrySet()) {
-            addKeyValuePair(prefix, e.getKey(), e.getValue(), (propsToMask == null) ? false : propsToMask.contains(e.getKey()));
+        for (Map.Entry<String,String> e : props.entrySet()) {
+            addKeyValuePair(prefix, e.getKey(), e.getValue(), propsToMask != null && propsToMask.contains(e.getKey()));
         }
         return this;
     }
@@ -219,8 +228,8 @@ public class ArgumentListBuilder implements Serializable, Cloneable {
 
         properties = Util.replaceMacro(properties, propertiesGeneratingResolver(vr));
 
-        for (Entry<Object,Object> entry : Util.loadProperties(properties).entrySet()) {
-            addKeyValuePair(prefix, (String)entry.getKey(), entry.getValue().toString(), (propsToMask == null) ? false : propsToMask.contains(entry.getKey()));
+        for (Map.Entry<Object,Object> entry : Util.loadProperties(properties).entrySet()) {
+            addKeyValuePair(prefix, (String)entry.getKey(), entry.getValue().toString(), propsToMask != null && propsToMask.contains(entry.getKey()));
         }
         return this;
     }
@@ -234,12 +243,13 @@ public class ArgumentListBuilder implements Serializable, Cloneable {
      *
      * @param original Resolution will be delegated to this resolver. Resolved
      *                 values will be escaped afterwards.
-     * @see <a href="https://issues.jenkins-ci.org/browse/JENKINS-10539">JENKINS-10539</a>
+     * @see <a href="https://issues.jenkins.io/browse/JENKINS-10539">JENKINS-10539</a>
      */
     private static VariableResolver<String> propertiesGeneratingResolver(final VariableResolver<String> original) {
 
         return new VariableResolver<String>() {
 
+            @Override
             public String resolve(String name) {
                 final String value = original.resolve(name);
                 if (value == null) return null;
@@ -250,7 +260,7 @@ public class ArgumentListBuilder implements Serializable, Cloneable {
     }
 
     public String[] toCommandArray() {
-        return args.toArray(new String[args.size()]);
+        return args.toArray(new String[0]);
     }
     
     @Override
@@ -291,66 +301,80 @@ public class ArgumentListBuilder implements Serializable, Cloneable {
     }
 
     /**
-     * Wrap command in a CMD.EXE call so we can return the exit code (ERRORLEVEL).
+     * Wrap command in a {@code CMD.EXE} call so we can return the exit code ({@code ERRORLEVEL}).
      * This method takes care of escaping special characters in the command, which
-     * is needed since the command is now passed as a string to the CMD.EXE shell.
+     * is needed since the command is now passed as a string to the {@code CMD.EXE} shell.
      * This is done as follows:
      * Wrap arguments in double quotes if they contain any of:
-     *   space *?,;^&<>|"
-     *   and if escapeVars is true, % followed by a letter.
-     * <br/> When testing from command prompt, these characters also need to be
-     * prepended with a ^ character: ^&<>|  -- however, invoking cmd.exe from
+     *   {@code space *?,;^&<>|"}
+     *   and if {@code escapeVars} is true, {@code %} followed by a letter.
+     * <p> When testing from command prompt, these characters also need to be
+     * prepended with a ^ character: {@code ^&<>|}—however, invoking {@code cmd.exe} from
      * Jenkins does not seem to require this extra escaping so it is not added by
      * this method.
-     * <br/> A " is prepended with another " character.  Note: Windows has issues
+     * <p> A {@code "} is prepended with another {@code "} character.  Note: Windows has issues
      * escaping some combinations of quotes and spaces.  Quotes should be avoided.
-     * <br/> If escapeVars is true, a % followed by a letter has that letter wrapped
+     * <p> If {@code escapeVars} is true, a {@code %} followed by a letter has that letter wrapped
      * in double quotes, to avoid possible variable expansion.
-     * ie, %foo% becomes "%"f"oo%".  The second % does not need special handling
-     * because it is not followed by a letter. <br/>
-     * Example: "-Dfoo=*abc?def;ghi^jkl&mno<pqr>stu|vwx""yz%"e"nd"
-     * @param escapeVars True to escape %VAR% references; false to leave these alone
+     * ie, {@code %foo%} becomes {@code "%"f"oo%"}.  The second {@code %} does not need special handling
+     * because it is not followed by a letter. <p>
+     * Example: {@code "-Dfoo=*abc?def;ghi^jkl&mno<pqr>stu|vwx""yz%"e"nd"}
+     * @param escapeVars True to escape {@code %VAR%} references; false to leave these alone
      *                   so they may be expanded when the command is run
-     * @return new ArgumentListBuilder that runs given command through cmd.exe /C
+     * @return new {@link ArgumentListBuilder} that runs given command through {@code cmd.exe /C}
      * @since 1.386
      */
     public ArgumentListBuilder toWindowsCommand(boolean escapeVars) {
-        StringBuilder quotedArgs = new StringBuilder();
+    	ArgumentListBuilder windowsCommand = new ArgumentListBuilder().add("cmd.exe", "/C");
         boolean quoted, percent;
-        for (String arg : args) {
+        for (int i = 0; i < args.size(); i++) {
+            StringBuilder quotedArgs = new StringBuilder();
+            String arg = args.get(i);
             quoted = percent = false;
-            for (int i = 0; i < arg.length(); i++) {
-                char c = arg.charAt(i);
+            for (int j = 0; j < arg.length(); j++) {
+                char c = arg.charAt(j);
                 if (!quoted && (c == ' ' || c == '*' || c == '?' || c == ',' || c == ';')) {
-                    quoted = startQuoting(quotedArgs, arg, i);
+                    quoted = startQuoting(quotedArgs, arg, j);
                 }
                 else if (c == '^' || c == '&' || c == '<' || c == '>' || c == '|') {
-                    if (!quoted) quoted = startQuoting(quotedArgs, arg, i);
+                    if (!quoted) quoted = startQuoting(quotedArgs, arg, j);
                     // quotedArgs.append('^'); See note in javadoc above
                 }
                 else if (c == '"') {
-                    if (!quoted) quoted = startQuoting(quotedArgs, arg, i);
+                    if (!quoted) quoted = startQuoting(quotedArgs, arg, j);
                     quotedArgs.append('"');
                 }
                 else if (percent && escapeVars
                          && ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))) {
-                    if (!quoted) quoted = startQuoting(quotedArgs, arg, i);
+                    if (!quoted) quoted = startQuoting(quotedArgs, arg, j);
                     quotedArgs.append('"').append(c);
                     c = '"';
                 }
-                percent = (c == '%');
+                percent = c == '%';
                 if (quoted) quotedArgs.append(c);
             }
-            if (quoted) quotedArgs.append('"'); else quotedArgs.append(arg);
-            quotedArgs.append(' ');
+            if (i == 0) {
+                if (quoted) {
+                    quotedArgs.insert(0, '"'); 
+                } else {
+                    quotedArgs.append('"');
+                }
+            }
+            if (quoted) {
+                quotedArgs.append('"');
+            } else {
+                quotedArgs.append(arg);
+            }
+            
+            windowsCommand.add(quotedArgs, mask.get(i));
         }
         // (comment copied from old code in hudson.tasks.Ant)
         // on Windows, executing batch file can't return the correct error code,
         // so we need to wrap it into cmd.exe.
         // double %% is needed because we want ERRORLEVEL to be expanded after
         // batch file executed, not before. This alone shows how broken Windows is...
-        quotedArgs.append("&& exit %%ERRORLEVEL%%");
-        return new ArgumentListBuilder().add("cmd.exe", "/C").addQuoted(quotedArgs.toString());
+        windowsCommand.add("&&").add("exit").add("%%ERRORLEVEL%%\"");
+        return windowsCommand;
     }
 
     /**
@@ -362,7 +386,7 @@ public class ArgumentListBuilder implements Serializable, Cloneable {
     }
 
     private static boolean startQuoting(StringBuilder buf, String arg, int atIndex) {
-        buf.append('"').append(arg.substring(0, atIndex));
+        buf.append('"').append(arg, 0, atIndex);
         return true;
     }
 
@@ -400,6 +424,7 @@ public class ArgumentListBuilder implements Serializable, Cloneable {
     /**
      * Debug/error message friendly output.
      */
+    @Override
     public String toString() {
         StringBuilder buf = new StringBuilder();
         for (int i=0; i<args.size(); i++) {

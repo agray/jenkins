@@ -1,17 +1,17 @@
 package hudson.model.queue;
 
+import static hudson.init.InitMilestone.JOB_CONFIG_ADAPTED;
+
 import hudson.ExtensionList;
 import hudson.ExtensionPoint;
 import hudson.init.Initializer;
-import jenkins.model.Jenkins;
 import hudson.model.LoadBalancer;
 import hudson.model.Queue;
 import hudson.model.Queue.BuildableItem;
-
+import java.util.Comparator;
 import java.util.List;
 import java.util.logging.Logger;
-
-import static hudson.init.InitMilestone.JOB_LOADED;
+import jenkins.model.Jenkins;
 
 /**
  * Singleton extension point for sorting buildable items
@@ -19,6 +19,15 @@ import static hudson.init.InitMilestone.JOB_LOADED;
  * @since 1.343
  */
 public abstract class QueueSorter implements ExtensionPoint {
+    /**
+     * A comparator that sorts {@link Queue.BlockedItem} instances based on how long they have been in the queue.
+     * (We want the time since in queue by default as blocking on upstream/downstream considers waiting items
+     * also and thus the blocking starts once the task is in the queue not once the task is buildable)
+     *
+     * @since 1.618
+     */
+    public static final Comparator<Queue.BlockedItem> DEFAULT_BLOCKED_ITEM_COMPARATOR = Comparator.comparingLong(Queue.Item::getInQueueSince);
+
     /**
      * Sorts the buildable items list. The items at the beginning will be executed
      * before the items at the end of the list.
@@ -29,11 +38,23 @@ public abstract class QueueSorter implements ExtensionPoint {
     public abstract void sortBuildableItems(List<BuildableItem> buildables);
 
     /**
+     * Sorts the blocked items list. The items at the beginning will be considered for removal from the blocked state
+     * before the items at the end of the list.
+     *
+     * @param blockedItems
+     *      List of blocked items in the queue. Never null.
+     * @since 1.618
+     */
+    public void sortBlockedItems(List<Queue.BlockedItem> blockedItems) {
+        blockedItems.sort(DEFAULT_BLOCKED_ITEM_COMPARATOR);
+    }
+
+    /**
      * All registered {@link QueueSorter}s. Only the first one will be picked up,
      * unless explicitly overridden by {@link Queue#setSorter(QueueSorter)}.
      */
     public static ExtensionList<QueueSorter> all() {
-        return Jenkins.getInstance().getExtensionList(QueueSorter.class);
+        return ExtensionList.lookup(QueueSorter.class);
     }
 
     /**
@@ -41,12 +62,12 @@ public abstract class QueueSorter implements ExtensionPoint {
      *
      * {@link Queue#Queue(LoadBalancer)} is too early to do this
      */
-    @Initializer(after=JOB_LOADED)
+    @Initializer(after=JOB_CONFIG_ADAPTED)
     public static void installDefaultQueueSorter() {
         ExtensionList<QueueSorter> all = all();
         if (all.isEmpty())  return;
 
-        Queue q = Jenkins.getInstance().getQueue();
+        Queue q = Jenkins.get().getQueue();
         if (q.getSorter()!=null)        return; // someone has already installed something. leave that alone.
 
         q.setSorter(all.get(0));

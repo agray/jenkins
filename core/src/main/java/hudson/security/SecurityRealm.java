@@ -23,55 +23,72 @@
  */
 package hudson.security;
 
-import groovy.lang.Binding;
-import hudson.ExtensionPoint;
 import hudson.DescriptorExtensionList;
 import hudson.Extension;
+import hudson.ExtensionPoint;
+import hudson.Util;
 import hudson.cli.CLICommand;
 import hudson.model.AbstractDescribableImpl;
 import hudson.model.Descriptor;
-import jenkins.model.IdStrategy;
-import jenkins.model.Jenkins;
 import hudson.security.FederatedLoginService.FederatedIdentity;
 import hudson.security.captcha.CaptchaSupport;
 import hudson.util.DescriptorList;
 import hudson.util.PluginServletFilter;
-import hudson.util.spring.BeanBuilder;
-import org.acegisecurity.Authentication;
-import org.acegisecurity.AuthenticationManager;
-import org.acegisecurity.GrantedAuthorityImpl;
-import org.acegisecurity.GrantedAuthority;
-import org.acegisecurity.context.SecurityContext;
-import org.acegisecurity.context.SecurityContextHolder;
-import org.acegisecurity.ui.rememberme.RememberMeServices;
-import static org.acegisecurity.ui.rememberme.TokenBasedRememberMeServices.ACEGI_SECURITY_HASHED_REMEMBER_ME_COOKIE_KEY;
-import org.acegisecurity.userdetails.UserDetailsService;
-import org.acegisecurity.userdetails.UserDetails;
-import org.acegisecurity.userdetails.UsernameNotFoundException;
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import javax.servlet.Filter;
+import javax.servlet.FilterConfig;
+import javax.servlet.ServletException;
+import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpSession;
+import jenkins.model.IdStrategy;
+import jenkins.model.Jenkins;
+import jenkins.security.AcegiSecurityExceptionFilter;
+import jenkins.security.AuthenticationSuccessHandler;
+import jenkins.security.BasicHeaderProcessor;
+import jenkins.util.SystemProperties;
+import net.sf.json.JSONObject;
+import org.apache.commons.lang.StringUtils;
+import org.jenkinsci.Symbol;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.DoNotUse;
 import org.kohsuke.stapler.HttpResponse;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
-import org.springframework.context.ApplicationContext;
-import org.springframework.web.context.WebApplicationContext;
-import org.springframework.dao.DataAccessException;
-
-import javax.servlet.Filter;
-import javax.servlet.FilterConfig;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpSession;
-import javax.servlet.http.Cookie;
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import java.util.logging.Logger;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.web.access.ExceptionTranslationFilter;
+import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
+import org.springframework.security.web.authentication.RememberMeServices;
+import org.springframework.security.web.authentication.SimpleUrlAuthenticationFailureHandler;
+import org.springframework.security.web.authentication.rememberme.AbstractRememberMeServices;
+import org.springframework.security.web.authentication.rememberme.RememberMeAuthenticationFilter;
+import org.springframework.security.web.authentication.session.SessionFixationProtectionStrategy;
+import org.springframework.security.web.authentication.www.BasicAuthenticationEntryPoint;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 
 /**
  * Pluggable security realm that connects external user database to Hudson.
  *
  * <p>
  * If additional views/URLs need to be exposed,
- * an active {@link SecurityRealm} is bound to <tt>CONTEXT_ROOT/securityRealm/</tt>
+ * an active {@link SecurityRealm} is bound to {@code CONTEXT_ROOT/securityRealm/}
  * through {@link jenkins.model.Jenkins#getSecurityRealm()}, so you can define additional pages and
  * operations on your {@link SecurityRealm}.
  *
@@ -80,7 +97,7 @@ import java.util.logging.Logger;
  * For compatibility reasons, there are two somewhat different ways to implement a custom SecurityRealm.
  *
  * <p>
- * One is to override the {@link #createSecurityComponents()} and create key Acegi components
+ * One is to override the {@link #createSecurityComponents()} and create key Spring Security components
  * that control the authentication process.
  * The default {@link SecurityRealm#createFilter(FilterConfig)} implementation then assembles them
  * into a chain of {@link Filter}s. All the incoming requests to Hudson go through this filter chain,
@@ -99,7 +116,7 @@ import java.util.logging.Logger;
  * The other way of doing this is to ignore {@link #createSecurityComponents()} completely (by returning
  * {@link SecurityComponents} created by the default constructor) and just concentrate on {@link #createFilter(FilterConfig)}.
  * As long as the resulting filter chain properly sets up {@link Authentication} object at the end of the processing,
- * Hudson doesn't really need you to fit the standard Acegi models like {@link AuthenticationManager} and
+ * Jenkins doesn't really need you to fit the standard Spring Security models like {@link AuthenticationManager} and
  * {@link UserDetailsService}.
  *
  * <p>
@@ -139,7 +156,7 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
      * {@link AuthenticationManager} instantiation often depends on the user-specified parameters
      * (for example, if the authentication is based on LDAP, the user needs to specify
      * the host name of the LDAP server.) Such configuration is expected to be
-     * presented to the user via <tt>config.jelly</tt> and then
+     * presented to the user via {@code config.jelly} and then
      * captured as instance variables inside the {@link SecurityRealm} implementation.
      *
      * <p>
@@ -150,12 +167,12 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
 
     /**
      * Returns the {@link IdStrategy} that should be used for turning
-     * {@link org.acegisecurity.userdetails.UserDetails#getUsername()} into an ID.
+     * {@link UserDetails#getUsername()} into an ID.
      * Mostly this should be {@link IdStrategy.CaseInsensitive} but there may be occasions when either
      * {@link IdStrategy.CaseSensitive} or {@link IdStrategy.CaseSensitiveEmailAddress} are the correct approach.
      *
      * @return the {@link IdStrategy} that should be used for turning
-     *         {@link org.acegisecurity.userdetails.UserDetails#getUsername()} into an ID.
+     *         {@link UserDetails#getUsername()} into an ID.
      * @since 1.566
      */
     public IdStrategy getUserIdStrategy() {
@@ -177,21 +194,11 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
     }
 
     /**
-     * Creates a {@link CliAuthenticator} object that authenticates an invocation of a CLI command.
-     * See {@link CliAuthenticator} for more details.
-     *
-     * @param command
-     *      The command about to be executed.
-     * @return
-     *      never null. By default, this method returns a no-op authenticator that always authenticates
-     *      the session as authenticated by the transport (which is often just {@link jenkins.model.Jenkins#ANONYMOUS}.)
+     * @deprecated No longer used.
      */
+    @Deprecated
     public CliAuthenticator createCliAuthenticator(final CLICommand command) {
-        return new CliAuthenticator() {
-            public Authentication authenticate() {
-                return command.getTransportAuthentication();
-            }
-        };
+        throw new UnsupportedOperationException();
     }
 
     /**
@@ -199,9 +206,10 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
      *
      * <p>
      * {@link SecurityRealm} is a singleton resource in Hudson, and therefore
-     * it's always configured through <tt>config.jelly</tt> and never with
-     * <tt>global.jelly</tt>. 
+     * it's always configured through {@code config.jelly} and never with
+     * {@code global.jelly}.
      */
+    @Override
     public Descriptor<SecurityRealm> getDescriptor() {
         return super.getDescriptor();
     }
@@ -209,16 +217,20 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
     /**
      * Returns the URL to submit a form for the authentication.
      * There's no need to override this, except for {@link LegacySecurityRealm}.
+     * @see AuthenticationProcessingFilter2
      */
     public String getAuthenticationGatewayUrl() {
-        return "j_acegi_security_check";
+        // Default as of Spring Security 3: https://stackoverflow.com/a/62552368/12916
+        // Cannot use the 4+ default of /login since that would clash with Jenkins/login.jelly which would be activated even for GET requests,
+        // and which cannot trivially be renamed since it is a fairly well-known URL sometimes used e.g. for K8s liveness checks.
+        return "j_spring_security_check";
     }
 
     /**
      * Gets the target URL of the "login" link.
      * There's no need to override this, except for {@link LegacySecurityRealm}.
      * On legacy implementation this should point to {@code loginEntry}, which
-     * is protected by <tt>web.xml</tt>, so that the user can be eventually authenticated
+     * is protected by {@code web.xml}, so that the user can be eventually authenticated
      * by the container.
      *
      * <p>
@@ -260,11 +272,29 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
      *      This parameter allows you to redirect people to different pages depending on who they are.
      * @return
      *      never null.
-     * @since 1.314
+     * @since 2.266
      * @see #doLogout(StaplerRequest, StaplerResponse) 
      */
-    protected String getPostLogOutUrl(StaplerRequest req, Authentication auth) {
+    protected String getPostLogOutUrl2(StaplerRequest req, Authentication auth) {
+        if (Util.isOverridden(SecurityRealm.class, getClass(), "getPostLogOutUrl", StaplerRequest.class, org.acegisecurity.Authentication.class) && !insideGetPostLogOutUrl.get()) {
+            insideGetPostLogOutUrl.set(true);
+            try {
+                return getPostLogOutUrl(req, org.acegisecurity.Authentication.fromSpring(auth));
+            } finally {
+                insideGetPostLogOutUrl.set(false);
+            }
+        }
         return req.getContextPath()+"/";
+    }
+    private static final ThreadLocal<Boolean> insideGetPostLogOutUrl = ThreadLocal.withInitial(() -> false);
+
+    /**
+     * @deprecated use {@link #getPostLogOutUrl2}
+     * @since 1.314
+     */
+    @Deprecated
+    protected String getPostLogOutUrl(StaplerRequest req, org.acegisecurity.Authentication auth) {
+        return getPostLogOutUrl2(req, auth.toSpring());
     }
 
     public CaptchaSupport getCaptchaSupport() {
@@ -284,7 +314,7 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
      *
      * <p>
      * The default implementation erases the session and do a few other clean up, then
-     * redirect the user to the URL specified by {@link #getPostLogOutUrl(StaplerRequest, Authentication)}.
+     * redirect the user to the URL specified by {@link #getPostLogOutUrl2(StaplerRequest, Authentication)}.
      *
      * @since 1.314
      */
@@ -295,26 +325,67 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         SecurityContextHolder.clearContext();
 
-        // reset remember-me cookie
-        Cookie cookie = new Cookie(ACEGI_SECURITY_HASHED_REMEMBER_ME_COOKIE_KEY,"");
-        cookie.setPath(req.getContextPath().length()>0 ? req.getContextPath() : "/");
-        rsp.addCookie(cookie);
+        String contextPath = req.getContextPath().length() > 0 ? req.getContextPath() : "/";
+        resetRememberMeCookie(req, rsp, contextPath);
+        clearStaleSessionCookies(req, rsp, contextPath);
 
-        rsp.sendRedirect2(getPostLogOutUrl(req,auth));
+        rsp.sendRedirect2(getPostLogOutUrl2(req,auth));
+    }
+
+    private void resetRememberMeCookie(StaplerRequest req, StaplerResponse rsp, String contextPath) {
+        Cookie cookie = new Cookie(AbstractRememberMeServices.SPRING_SECURITY_REMEMBER_ME_COOKIE_KEY, "");
+        cookie.setMaxAge(0);
+        cookie.setSecure(req.isSecure());
+        cookie.setHttpOnly(true);
+        cookie.setPath(contextPath);
+        rsp.addCookie(cookie);
+    }
+
+    private void clearStaleSessionCookies(StaplerRequest req, StaplerResponse rsp, String contextPath) {
+        /* While "executableWar.jetty.sessionIdCookieName" and
+         * "executableWar.jetty.disableCustomSessionIdCookieName"
+         * <https://github.com/jenkinsci/extras-executable-war/blob/6558df699d1366b18d045d2ffda3e970df377873/src/main/java/Main.java#L79-L97>
+         * can influence the current running behavior of the generated session cookie, we aren't interested
+         * in either of them at all.
+         *
+         * What matters to us are any stale cookies.
+         * Those cookies would have been created by this jenkins in a different incarnation, when it
+         * could, perhaps, have had different configuration flags, including for those configurables.
+         *
+         * Thus, we unconditionally zap all JSESSIONID. cookies.
+         * a new cookie will be generated by sendRedirect2(...)
+         *
+         * We don't care about JSESSIONID cookies outside our path because it's the browser's
+         * responsibility not to send them to us in the first place.
+         */
+        final String cookieName = "JSESSIONID.";
+        Cookie[] cookies = req.getCookies();
+        if (cookies != null) {
+            for (Cookie cookie : cookies) {
+                if (cookie.getName().startsWith(cookieName)) {
+                    LOGGER.log(Level.FINE, "Removing cookie {0} during logout", cookie.getName());
+                    // one reason users log out is to clear their session(s)
+                    // so tell the browser to drop all old sessions
+                    cookie.setMaxAge(0);
+                    cookie.setValue("");
+                    rsp.addCookie(cookie);
+                }
+            }
+        }
     }
 
     /**
      * Returns true if this {@link SecurityRealm} allows online sign-up.
-     * This creates a hyperlink that redirects users to <tt>CONTEXT_ROOT/signUp</tt>,
-     * which will be served by the <tt>signup.jelly</tt> view of this class.
+     * This creates a hyperlink that redirects users to {@code CONTEXT_ROOT/signUp},
+     * which will be served by the {@code signup.jelly} view of this class.
      *
      * <p>
      * If the implementation needs to redirect the user to a different URL
-     * for signing up, use the following jelly script as <tt>signup.jelly</tt>
+     * for signing up, use the following jelly script as {@code signup.jelly}
      *
-     * <pre><xmp>
+     * <pre>{@code <xmp>
      * <st:redirect url="http://www.sun.com/" xmlns:st="jelly:stapler"/>
-     * </xmp></pre>
+     * </xmp>}</pre>
      */
     public boolean allowsSignup() {
         Class clz = getClass();
@@ -324,32 +395,42 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
     /**
      * Shortcut for {@link UserDetailsService#loadUserByUsername(String)}.
      *
-     * @throws UserMayOrMayNotExistException
+     * @throws UserMayOrMayNotExistException2
      *      If the security realm cannot even tell if the user exists or not.
      * @return
      *      never null.
+     * @since 2.266
      */
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException, DataAccessException {
-        return getSecurityComponents().userDetails.loadUserByUsername(username);
+    public UserDetails loadUserByUsername2(String username) throws UsernameNotFoundException {
+        if (Util.isOverridden(SecurityRealm.class, getClass(), "loadUserByUsername", String.class)) {
+            try {
+                return loadUserByUsername(username).toSpring();
+            } catch (org.acegisecurity.AcegiSecurityException x) {
+                throw x.toSpring();
+            } catch (org.springframework.dao.DataAccessException x) {
+                throw x.toSpring();
+            }
+        } else {
+            return getSecurityComponents().userDetails2.loadUserByUsername(username);
+        }
+    }
+
+    /**
+     * @deprecated use {@link #loadUserByUsername2}
+     */
+    @Deprecated
+    public org.acegisecurity.userdetails.UserDetails loadUserByUsername(String username) throws org.acegisecurity.userdetails.UsernameNotFoundException, org.springframework.dao.DataAccessException {
+        try {
+            return org.acegisecurity.userdetails.UserDetails.fromSpring(loadUserByUsername2(username));
+        } catch (AuthenticationException x) {
+            throw org.acegisecurity.AuthenticationException.fromSpring(x);
+        }
     }
 
     /**
      * If this {@link SecurityRealm} supports a look up of {@link GroupDetails} by their names, override this method
      * to provide the look up.
-     *
      * <p>
-     * This information, when available, can be used by {@link AuthorizationStrategy}s to improve the UI and
-     * error diagnostics for the user.
-     */
-    public GroupDetails loadGroupByGroupname(String groupname) throws UsernameNotFoundException, DataAccessException {
-        throw new UserMayOrMayNotExistException(groupname);
-    }
-
-    /**
-     * If this {@link SecurityRealm} supports a look up of {@link GroupDetails} by their names, override this method
-     * to provide the look up.
-     * <p/>
-     * <p/>
      * This information, when available, can be used by {@link AuthorizationStrategy}s to improve the UI and
      * error diagnostics for the user.
      *
@@ -357,14 +438,56 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
      * @param fetchMembers if {@code true} then try and fetch the members of the group if it exists. Trying does not
      *                     imply that the members will be fetched and {@link hudson.security.GroupDetails#getMembers()}
      *                     may still return {@code null}
-     * @throws UserMayOrMayNotExistException if no conclusive result could be determined regarding the group existance.
+     * @throws UserMayOrMayNotExistException2 if no conclusive result could be determined regarding the group existence.
      * @throws UsernameNotFoundException     if the group does not exist.
-     * @throws DataAccessException           if the backing security realm could not be connected to.
+     * @since 2.266
+     */
+    public GroupDetails loadGroupByGroupname2(String groupname, boolean fetchMembers)
+            throws UsernameNotFoundException {
+        if (Util.isOverridden(SecurityRealm.class, getClass(), "loadGroupByGroupname", String.class)) {
+            try {
+                return loadGroupByGroupname(groupname);
+            } catch (org.acegisecurity.AcegiSecurityException x) {
+                throw x.toSpring();
+            } catch (org.springframework.dao.DataAccessException x) {
+                throw x.toSpring();
+            }
+        } else if (Util.isOverridden(SecurityRealm.class, getClass(), "loadGroupByGroupname", String.class, boolean.class)) {
+            try {
+                return loadGroupByGroupname(groupname, fetchMembers);
+            } catch (org.acegisecurity.AcegiSecurityException x) {
+                throw x.toSpring();
+            } catch (org.springframework.dao.DataAccessException x) {
+                throw x.toSpring();
+            }
+        } else {
+            throw new UserMayOrMayNotExistException2(groupname);
+        }
+    }
+
+    /**
+     * @deprecated use {@link #loadGroupByGroupname2}
+     */
+    @Deprecated
+    public GroupDetails loadGroupByGroupname(String groupname) throws org.acegisecurity.userdetails.UsernameNotFoundException, org.springframework.dao.DataAccessException {
+        try {
+            return loadGroupByGroupname2(groupname, false);
+        } catch (AuthenticationException x) {
+            throw org.acegisecurity.AuthenticationException.fromSpring(x);
+        }
+    }
+
+    /**
+     * @deprecated use {@link #loadGroupByGroupname2}
      * @since 1.549
      */
-    public GroupDetails loadGroupByGroupname(String groupname, boolean fetchMembers)
-            throws UsernameNotFoundException, DataAccessException {
-        return loadGroupByGroupname(groupname);
+    @Deprecated
+    public GroupDetails loadGroupByGroupname(String groupname, boolean fetchMembers) throws org.acegisecurity.userdetails.UsernameNotFoundException, org.springframework.dao.DataAccessException {
+        try {
+            return loadGroupByGroupname2(groupname, fetchMembers);
+        } catch (AuthenticationException x) {
+            throw org.acegisecurity.AuthenticationException.fromSpring(x);
+        }
     }
 
     /**
@@ -396,7 +519,10 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
         if (captchaSupport != null) {
             String id = req.getSession().getId();
             rsp.setContentType("image/png");
-            rsp.addHeader("Cache-Control", "no-cache");
+            // source: https://stackoverflow.com/a/3414217
+            rsp.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+            rsp.setHeader("Pragma", "no-cache");
+            rsp.setHeader("Expires", "0");
             captchaSupport.generateImage(id, rsp.getOutputStream());
         }
     }
@@ -412,26 +538,6 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
 
         // If no Captcha Support then bogus validation always returns true
         return true;
-    }
-
-    /**
-     * Picks up the instance of the given type from the spring context.
-     * If there are multiple beans of the same type or if there are none,
-     * this method treats that as an {@link IllegalArgumentException}.
-     *
-     * This method is intended to be used to pick up a Acegi object from
-     * spring once the bean definition file is parsed.
-     */
-    public static <T> T findBean(Class<T> type, ApplicationContext context) {
-        Map m = context.getBeansOfType(type);
-        switch(m.size()) {
-        case 0:
-            throw new IllegalArgumentException("No beans of "+type+" are defined");
-        case 1:
-            return type.cast(m.values().iterator().next());
-        default:
-            throw new IllegalArgumentException("Multiple beans of "+type+" are defined: "+m);            
-        }
     }
 
     /**
@@ -456,7 +562,7 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
      *
      * <p>
      * The default implementation uses {@link #getSecurityComponents()} and builds
-     * a standard filter chain from /WEB-INF/security/SecurityFilters.groovy.
+     * a standard filter chain.
      * But subclasses can override this to completely change the filter sequence.
      *
      * <p>
@@ -468,14 +574,52 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
     public Filter createFilter(FilterConfig filterConfig) {
         LOGGER.entering(SecurityRealm.class.getName(), "createFilter");
         
-        Binding binding = new Binding();
         SecurityComponents sc = getSecurityComponents();
-        binding.setVariable("securityComponents", sc);
-        binding.setVariable("securityRealm",this);
-        BeanBuilder builder = new BeanBuilder();
-        builder.parse(filterConfig.getServletContext().getResourceAsStream("/WEB-INF/security/SecurityFilters.groovy"),binding);
-        WebApplicationContext context = builder.createApplicationContext();
-        return (Filter) context.getBean("filter");
+        List<Filter> filters = new ArrayList<>();
+        {
+            HttpSessionSecurityContextRepository httpSessionSecurityContextRepository = new HttpSessionSecurityContextRepository();
+            httpSessionSecurityContextRepository.setAllowSessionCreation(false);
+            filters.add(new HttpSessionContextIntegrationFilter2(httpSessionSecurityContextRepository));
+        }
+        { // if any "Authorization: Basic xxx:yyy" is sent this is the filter that processes it
+            BasicHeaderProcessor bhp = new BasicHeaderProcessor();
+            // if basic authentication fails (which only happens incorrect basic auth credential is sent),
+            // respond with 401 with basic auth request, instead of redirecting the user to the login page,
+            // since users of basic auth tends to be a program and won't see the redirection to the form
+            // page as a failure
+            BasicAuthenticationEntryPoint basicAuthenticationEntryPoint = new BasicAuthenticationEntryPoint();
+            basicAuthenticationEntryPoint.setRealmName("Jenkins");
+            bhp.setAuthenticationEntryPoint(basicAuthenticationEntryPoint);
+            bhp.setRememberMeServices(sc.rememberMe2);
+            filters.add(bhp);
+        }
+        {
+            AuthenticationProcessingFilter2 apf = new AuthenticationProcessingFilter2(getAuthenticationGatewayUrl());
+            apf.setAuthenticationManager(sc.manager2);
+            if (SystemProperties.getInteger(SecurityRealm.class.getName() + ".sessionFixationProtectionMode", 1) == 1) {
+                // By default, use the 'canonical' protection from Spring Security; see AuthenticationProcessingFilter2#successfulAuthentication for alternative
+                apf.setSessionAuthenticationStrategy(new SessionFixationProtectionStrategy());
+            }
+            apf.setRememberMeServices(sc.rememberMe2);
+            final AuthenticationSuccessHandler successHandler = new AuthenticationSuccessHandler();
+            successHandler.setTargetUrlParameter("from");
+            apf.setAuthenticationSuccessHandler(successHandler);
+            apf.setAuthenticationFailureHandler(new SimpleUrlAuthenticationFailureHandler("/loginError"));
+            filters.add(apf);
+        }
+        filters.add(new RememberMeAuthenticationFilter(sc.manager2, sc.rememberMe2));
+        filters.addAll(commonFilters());
+        return new ChainedServletFilter(filters);
+    }
+
+    protected final List<Filter> commonFilters() {
+        // like Jenkins.ANONYMOUS:
+        AnonymousAuthenticationFilter apf = new AnonymousAuthenticationFilter("anonymous", "anonymous", Collections.singletonList(new SimpleGrantedAuthority("anonymous")));
+        ExceptionTranslationFilter etf = new ExceptionTranslationFilter(new HudsonAuthenticationEntryPoint("/" + getLoginUrl() + "?from={0}"));
+        etf.setAccessDeniedHandler(new AccessDeniedHandlerImpl());
+        UnwrapSecurityExceptionFilter usef = new UnwrapSecurityExceptionFilter();
+        AcegiSecurityExceptionFilter asef = new AcegiSecurityExceptionFilter();
+        return Arrays.asList(apf, etf, usef, asef);
     }
 
     /**
@@ -483,33 +627,70 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
      */
     public static final SecurityRealm NO_AUTHENTICATION = new None();
 
+    /**
+     * Perform a calculation where we should go back after successful login
+     *
+     * @return Encoded URI where we should go back after successful login
+     *         or "/" if no way back or an issue occurred
+     *
+     * @since 2.4
+     */
+    @Restricted(DoNotUse.class)
+    public static String getFrom() {
+        String from = null, returnValue = null;
+        final StaplerRequest request = Stapler.getCurrentRequest();
+
+        // Try to obtain a return point from the query parameter
+        if (request != null) {
+            from = request.getParameter("from");
+        }
+
+        // If entry point was not found, try to deduce it from the request URI
+        // except pages related to login process
+        if (from == null
+                && request != null
+                && request.getRequestURI() != null
+                && !request.getRequestURI().equals("/loginError")
+                && !request.getRequestURI().equals("/login")) {
+
+                from = request.getRequestURI();
+        }
+
+        // If deduced entry point isn't deduced yet or the content is a blank value
+        // use the root web point "/" as a fallback
+        from = StringUtils.defaultIfBlank(from, "/").trim();
+        
+        // Encode the return value
+        try {
+            returnValue = URLEncoder.encode(from, "UTF-8");
+        } catch (UnsupportedEncodingException e) { }
+
+        // Return encoded value or at least "/" in the case exception occurred during encode()
+        // or if the encoded content is blank value
+        return StringUtils.isBlank(returnValue) ? "/" : returnValue;
+    }
+
     private static class None extends SecurityRealm {
+        @Override
         public SecurityComponents createSecurityComponents() {
             return new SecurityComponents(new AuthenticationManager() {
+                @Override
                 public Authentication authenticate(Authentication authentication) {
                     return authentication;
                 }
             }, new UserDetailsService() {
-                public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException, DataAccessException {
+                @Override
+                public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
                     throw new UsernameNotFoundException(username);
                 }
             });
         }
 
         /**
-         * This special instance is not configurable explicitly,
-         * so it doesn't have a descriptor.
-         */
-        @Override
-        public Descriptor<SecurityRealm> getDescriptor() {
-            return null;
-        }
-
-        /**
          * There's no group.
          */
         @Override
-        public GroupDetails loadGroupByGroupname(String groupname) throws UsernameNotFoundException, DataAccessException {
+        public GroupDetails loadGroupByGroupname2(String groupname, boolean fetchMembers) throws UsernameNotFoundException {
             throw new UsernameNotFoundException(groupname);
         }
 
@@ -527,6 +708,21 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
         private Object readResolve() {
             return NO_AUTHENTICATION;
         }
+        
+        @Extension(ordinal=-100)
+        @Symbol("none")
+        public static class DescriptorImpl extends Descriptor<SecurityRealm> {
+
+            @Override
+            public String getDisplayName() {
+                return Messages.NoneSecurityRealm_DisplayName();
+            }
+            
+            @Override
+            public SecurityRealm newInstance(StaplerRequest req, JSONObject formData) throws Descriptor.FormException {
+                return NO_AUTHENTICATION;
+            }    
+        }
     }
 
     /**
@@ -539,9 +735,33 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
      * @see SecurityRealm#createSecurityComponents() 
      */
     public static final class SecurityComponents {
-        public final AuthenticationManager manager;
-        public final UserDetailsService userDetails;
-        public final RememberMeServices rememberMe;
+        /**
+         * @since 2.266
+         */
+        public final AuthenticationManager manager2;
+        /**
+         * @deprecated use {@link #manager2}
+         */
+        @Deprecated
+        public final org.acegisecurity.AuthenticationManager manager;
+        /**
+         * @since 2.266
+         */
+        public final UserDetailsService userDetails2;
+        /**
+         * @deprecated use {@link #userDetails2}
+         */
+        @Deprecated
+        public final org.acegisecurity.userdetails.UserDetailsService userDetails;
+        /**
+         * @since 2.266
+         */
+        public final RememberMeServices rememberMe2;
+        /**
+         * @deprecated use {@link #rememberMe2}
+         */
+        @Deprecated
+        public final org.acegisecurity.ui.rememberme.RememberMeServices rememberMe;
 
         public SecurityComponents() {
             // we use AuthenticationManagerProxy here just as an implementation that fails all the time,
@@ -549,39 +769,62 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
             this(new AuthenticationManagerProxy());
         }
 
+        /**
+         * @since 2.266
+         */
         public SecurityComponents(AuthenticationManager manager) {
             // we use UserDetailsServiceProxy here just as an implementation that fails all the time,
             // not as a proxy. No one is supposed to use this as a proxy.
             this(manager,new UserDetailsServiceProxy());
         }
 
+        /**
+         * @deprecated use {@link #SecurityComponents(AuthenticationManager)}
+         */
+        @Deprecated
+        public SecurityComponents(org.acegisecurity.AuthenticationManager manager) {
+            this(manager.toSpring());
+        }
+
+        /**
+         * @since 2.266
+         */
         public SecurityComponents(AuthenticationManager manager, UserDetailsService userDetails) {
             this(manager,userDetails,createRememberMeService(userDetails));
         }
 
-        public SecurityComponents(AuthenticationManager manager, UserDetailsService userDetails, RememberMeServices rememberMe) {
-            assert manager!=null && userDetails!=null && rememberMe!=null;
-            this.manager = manager;
-            this.userDetails = userDetails;
-            this.rememberMe = rememberMe;
+        /**
+         * @deprecated use {@link #SecurityComponents(AuthenticationManager, UserDetailsService)}
+         */
+        @Deprecated
+        public SecurityComponents(org.acegisecurity.AuthenticationManager manager, org.acegisecurity.userdetails.UserDetailsService userDetails) {
+            this(manager.toSpring(), userDetails.toSpring());
         }
 
-        @SuppressWarnings("deprecation")
+        /**
+         * @since 2.266
+         */
+        public SecurityComponents(AuthenticationManager manager, UserDetailsService userDetails, RememberMeServices rememberMe) {
+            assert manager!=null && userDetails!=null && rememberMe!=null;
+            this.manager2 = manager;
+            this.userDetails2 = userDetails;
+            this.rememberMe2 = rememberMe;
+            this.manager = org.acegisecurity.AuthenticationManager.fromSpring(manager);
+            this.userDetails = org.acegisecurity.userdetails.UserDetailsService.fromSpring(userDetails);
+            this.rememberMe = org.acegisecurity.ui.rememberme.RememberMeServices.fromSpring(rememberMe);
+        }
+
+        /**
+         * @deprecated use {@link #SecurityComponents(AuthenticationManager, UserDetailsService, RememberMeServices)}
+         */
+        @Deprecated
+        public SecurityComponents(org.acegisecurity.AuthenticationManager manager, org.acegisecurity.userdetails.UserDetailsService userDetails, org.acegisecurity.ui.rememberme.RememberMeServices rememberMe) {
+            this(manager.toSpring(), userDetails.toSpring(), rememberMe.toSpring());
+        }
+
         private static RememberMeServices createRememberMeService(UserDetailsService uds) {
             // create our default TokenBasedRememberMeServices, which depends on the availability of the secret key
-            TokenBasedRememberMeServices2 rms = new TokenBasedRememberMeServices2();
-            rms.setUserDetailsService(uds);
-            /*
-                TokenBasedRememberMeServices needs to be used in conjunction with RememberMeAuthenticationProvider,
-                and both needs to use the same key (this is a reflection of a poor design in AcgeiSecurity, if you ask me)
-                and various security plugins have its own groovy script that configures them.
-
-                So if we change this, it creates a painful situation for those plugins by forcing them to choose
-                to work with earlier version of Jenkins or newer version of Jenkins, and not both.
-
-                So we keep this here.
-             */
-            rms.setKey(Jenkins.getInstance().getSecretKey());
+            TokenBasedRememberMeServices2 rms = new TokenBasedRememberMeServices2(uds);
             rms.setParameter("remember_me"); // this is the form field name in login.jelly
             return rms;
         }
@@ -593,13 +836,14 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
      * @deprecated as of 1.286
      *      Use {@link #all()} for read access, and use {@link Extension} for registration.
      */
-    public static final DescriptorList<SecurityRealm> LIST = new DescriptorList<SecurityRealm>(SecurityRealm.class);
+    @Deprecated
+    public static final DescriptorList<SecurityRealm> LIST = new DescriptorList<>(SecurityRealm.class);
 
     /**
      * Returns all the registered {@link SecurityRealm} descriptors.
      */
     public static DescriptorExtensionList<SecurityRealm,Descriptor<SecurityRealm>> all() {
-        return Jenkins.getInstance().<SecurityRealm,Descriptor<SecurityRealm>>getDescriptorList(SecurityRealm.class);
+        return Jenkins.get().getDescriptorList(SecurityRealm.class);
     }
 
 
@@ -608,6 +852,14 @@ public abstract class SecurityRealm extends AbstractDescribableImpl<SecurityReal
     /**
      * {@link GrantedAuthority} that represents the built-in "authenticated" role, which is granted to
      * anyone non-anonymous.
+     * @since 2.266
      */
-    public static final GrantedAuthority AUTHENTICATED_AUTHORITY = new GrantedAuthorityImpl("authenticated");
+    public static final GrantedAuthority AUTHENTICATED_AUTHORITY2 = new SimpleGrantedAuthority("authenticated");
+
+    /**
+     * @deprecated use {@link #AUTHENTICATED_AUTHORITY2}
+     */
+    @Deprecated
+    public static final org.acegisecurity.GrantedAuthority AUTHENTICATED_AUTHORITY = new org.acegisecurity.GrantedAuthorityImpl("authenticated");
+
 }

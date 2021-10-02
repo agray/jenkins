@@ -25,11 +25,9 @@ package hudson.util;
 
 import hudson.Util;
 import hudson.model.Node;
-
 import java.io.IOException;
-
-import org.kohsuke.stapler.export.ExportedBean;
 import org.kohsuke.stapler.export.Exported;
+import org.kohsuke.stapler.export.ExportedBean;
 
 /**
  * Represents a clock difference. Immutable.
@@ -41,8 +39,8 @@ public final class ClockDifference {
     /**
      * The difference in milliseconds.
      *
-     * Positive value means the slave is behind the master,
-     * negative value means the slave is ahead of the master.
+     * Positive value means the agent is behind the master,
+     * negative value means the agent is ahead of the master.
      */
     @Exported
     public final long diff;
@@ -95,9 +93,7 @@ public final class ClockDifference {
         try {
             if(d==null) return FAILED_HTML;
             return d.getClockDifference().toHtml();
-        } catch (IOException e) {
-            return FAILED_HTML;
-        } catch (InterruptedException e) {
+        } catch (IOException | InterruptedException e) {
             return FAILED_HTML;
         }
     }

@@ -23,21 +23,22 @@
  */
 package hudson.model;
 
+import edu.umd.cs.findbugs.annotations.CheckForNull;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.AbortException;
 import hudson.DescriptorExtensionList;
 import hudson.Extension;
 import hudson.ExtensionPoint;
-import hudson.AbortException;
+import hudson.Util;
 import hudson.cli.CLICommand;
 import hudson.util.DescriptorList;
-
-import java.io.Serializable;
 import java.io.IOException;
+import java.io.Serializable;
+import java.util.Objects;
 import java.util.logging.Logger;
-import javax.annotation.CheckForNull;
-
 import jenkins.model.Jenkins;
 import net.sf.json.JSONObject;
-
+import org.kohsuke.stapler.DataBoundSetter;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.export.Exported;
 import org.kohsuke.stapler.export.ExportedBean;
@@ -51,7 +52,7 @@ import org.kohsuke.stapler.export.ExportedBean;
  *
  * <p>
  * The actual meaning and the purpose of parameters are entirely up to users, so
- * what the concrete parameter implmentation is pluggable. Write subclasses
+ * what the concrete parameter implementation is pluggable. Write subclasses
  * in a plugin and put {@link Extension} on the descriptor to register them.
  *
  * <p>
@@ -75,25 +76,22 @@ import org.kohsuke.stapler.export.ExportedBean;
  *
  * <h2>Persistence</h2>
  * <p>
- * Instances of {@link ParameterDefinition}s are persisted into job <tt>config.xml</tt>
+ * Instances of {@link ParameterDefinition}s are persisted into job {@code config.xml}
  * through XStream.
  *
  *
- * <h2>Assocaited Views</h2>
- * <h4>config.jelly</h4>
- * <p>
- * {@link ParameterDefinition} class uses <tt>config.jelly</tt> to provide contribute a form
- * fragment in the job configuration screen. Values entered there is fed back to
+ * <h2>Associated Views</h2>
+ * <h3>config.jelly</h3>
+ * {@link ParameterDefinition} class uses {@code config.jelly} to contribute a form
+ * fragment in the job configuration screen. Values entered there are fed back to
  * {@link ParameterDescriptor#newInstance(StaplerRequest, JSONObject)} to create {@link ParameterDefinition}s.
  *
- * <h4>index.jelly</h4>
- * The <tt>index.jelly</tt> view contributes a form fragment in the page where the user
+ * <h3>index.jelly</h3>
+ * The {@code index.jelly} view contributes a form fragment in the page where the user
  * enters actual values of parameters for a build. The result of this form submission
  * is then fed to {@link ParameterDefinition#createValue(StaplerRequest, JSONObject)} to
  * create {@link ParameterValue}s.
  *
- * TODO: what Jelly pages does this object need for rendering UI?
- * TODO: {@link ParameterValue} needs to have some mechanism to expose values to the build
  * @see StringParameterDefinition
  */
 @ExportedBean(defaultVisibility=3)
@@ -102,15 +100,22 @@ public abstract class ParameterDefinition implements
 
     private final String name;
 
-    private final String description;
+    private String description;
 
-    public ParameterDefinition(String name) {
-        this(name, null);
+    public ParameterDefinition(@NonNull String name) {
+        if (name == null) {
+            throw new IllegalArgumentException("Parameter name must be non-null");
+        }
+        this.name = name;
     }
 
-    public ParameterDefinition(String name, String description) {
-        this.name = name;
-        this.description = description;
+    /**
+     * @deprecated Prefer {@link #ParameterDefinition(String)} with a {@link org.kohsuke.stapler.DataBoundConstructor} and allow {@link #setDescription} to be used as needed
+     */
+    @Deprecated
+    public ParameterDefinition(@NonNull String name, String description) {
+        this(name);
+        setDescription(description);
     }
 
     /**
@@ -130,33 +135,43 @@ public abstract class ParameterDefinition implements
     }
     
     @Exported
+    @NonNull
     public String getName() {
         return name;
     }
 
     @Exported
+    @CheckForNull
     public String getDescription() {
         return description;
+    }
+
+    /**
+     * @since 2.281
+     */
+    @DataBoundSetter
+    public void setDescription(@CheckForNull String description) {
+        this.description = Util.fixEmpty(description);
     }
 
     /**
      * return parameter description, applying the configured MarkupFormatter for jenkins instance.
      * @since 1.521
      */
+    @CheckForNull
     public String getFormattedDescription() {
         try {
-            return Jenkins.getInstance().getMarkupFormatter().translate(description);
+            return Jenkins.get().getMarkupFormatter().translate(getDescription());
         } catch (IOException e) {
             LOGGER.warning("failed to translate description using configured markup formatter");
             return "";
         }
     }
 
-    /**
-     * {@inheritDoc}
-     */
+    @Override
+    @NonNull
     public ParameterDescriptor getDescriptor() {
-        return (ParameterDescriptor) Jenkins.getInstance().getDescriptorOrDie(getClass());
+        return (ParameterDescriptor) Jenkins.get().getDescriptorOrDie(getClass());
     }
 
     /**
@@ -193,12 +208,11 @@ public abstract class ParameterDefinition implements
      * Create a parameter value from the string given in the CLI.
      *
      * @param command
-     *      This is the command that got the parameter. You can use its {@link CLICommand#checkChannel()}
-     *      for interacting with the CLI JVM.
+     *      This is the command that got the parameter.
      * @throws AbortException
      *      If the CLI processing should be aborted. Hudson will report the error message
      *      without stack trace, and then exits this command. Useful for graceful termination.
-     * @throws Exception
+     * @throws RuntimeException
      *      All the other exceptions cause the stack trace to be dumped, and then
      *      the command exits with an error code.
      * @since 1.334
@@ -221,10 +235,44 @@ public abstract class ParameterDefinition implements
     }
 
     /**
+     * Checks whether a given value is valid for this definition.
+     * @since 2.244
+     * @param value The value to validate.
+     * @return True if the value is valid for this definition. False if it is invalid.
+     */
+    public boolean isValid(ParameterValue value) {
+        // The base implementation just accepts the value.
+        return true;
+    }
+
+    @Override
+    public int hashCode() {
+        return Jenkins.XSTREAM2.toXML(this).hashCode();
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (this == obj)
+            return true;
+        if (obj == null)
+            return false;
+        if (getClass() != obj.getClass())
+            return false;
+        ParameterDefinition other = (ParameterDefinition) obj;
+        if (!Objects.equals(getName(), other.getName()))
+            return false;
+        if (!Objects.equals(getDescription(), other.getDescription()))
+            return false;
+        String thisXml  = Jenkins.XSTREAM2.toXML(this);
+        String otherXml = Jenkins.XSTREAM2.toXML(other);
+        return thisXml.equals(otherXml);
+    }
+
+    /**
      * Returns all the registered {@link ParameterDefinition} descriptors.
      */
     public static DescriptorExtensionList<ParameterDefinition,ParameterDescriptor> all() {
-        return Jenkins.getInstance().<ParameterDefinition,ParameterDescriptor>getDescriptorList(ParameterDefinition.class);
+        return Jenkins.get().getDescriptorList(ParameterDefinition.class);
     }
 
     /**
@@ -232,7 +280,8 @@ public abstract class ParameterDefinition implements
      * @deprecated as of 1.286
      *      Use {@link #all()} for read access, and {@link Extension} for registration.
      */
-    public static final DescriptorList<ParameterDefinition> LIST = new DescriptorList<ParameterDefinition>(ParameterDefinition.class);
+    @Deprecated
+    public static final DescriptorList<ParameterDefinition> LIST = new DescriptorList<>(ParameterDefinition.class);
 
     public abstract static class ParameterDescriptor extends
             Descriptor<ParameterDefinition> {

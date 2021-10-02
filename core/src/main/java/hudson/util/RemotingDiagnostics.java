@@ -23,26 +23,16 @@
  */
 package hudson.util;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import groovy.lang.Binding;
 import groovy.lang.GroovyShell;
 import hudson.FilePath;
 import hudson.Functions;
-import jenkins.model.Jenkins;
 import hudson.remoting.AsyncFutureImpl;
-import hudson.remoting.Callable;
 import hudson.remoting.DelegatingCallable;
 import hudson.remoting.Future;
 import hudson.remoting.VirtualChannel;
 import hudson.security.AccessControlled;
-import org.codehaus.groovy.control.CompilerConfiguration;
-import org.codehaus.groovy.control.customizers.ImportCustomizer;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
-import org.kohsuke.stapler.WebMethod;
-
-import javax.management.JMException;
-import javax.management.MBeanServer;
-import javax.management.ObjectName;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -53,12 +43,22 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TreeMap;
+import javax.management.JMException;
+import javax.management.MBeanServer;
+import javax.management.ObjectName;
+import jenkins.model.Jenkins;
+import jenkins.security.MasterToSlaveCallable;
+import org.codehaus.groovy.control.CompilerConfiguration;
+import org.codehaus.groovy.control.customizers.ImportCustomizer;
+import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerResponse;
+import org.kohsuke.stapler.WebMethod;
 
 /**
  * Various remoting operations related to diagnostics.
  *
  * <p>
- * These code are useful wherever {@link VirtualChannel} is used, such as master, slaves, Maven JVMs, etc.
+ * These code are useful wherever {@link VirtualChannel} is used, such as master, agents, Maven JVMs, etc.
  *
  * @author Kohsuke Kawaguchi
  * @since 1.175
@@ -66,13 +66,14 @@ import java.util.TreeMap;
 public final class RemotingDiagnostics {
     public static Map<Object,Object> getSystemProperties(VirtualChannel channel) throws IOException, InterruptedException {
         if(channel==null)
-            return Collections.<Object,Object>singletonMap("N/A","N/A");
+            return Collections.singletonMap("N/A","N/A");
         return channel.call(new GetSystemProperties());
     }
 
-    private static final class GetSystemProperties implements Callable<Map<Object,Object>,RuntimeException> {
+    private static final class GetSystemProperties extends MasterToSlaveCallable<Map<Object,Object>,RuntimeException> {
+        @Override
         public Map<Object,Object> call() {
-            return new TreeMap<Object,Object>(System.getProperties());
+            return new TreeMap<>(System.getProperties());
         }
         private static final long serialVersionUID = 1L;
     }
@@ -85,13 +86,14 @@ public final class RemotingDiagnostics {
 
     public static Future<Map<String,String>> getThreadDumpAsync(VirtualChannel channel) throws IOException, InterruptedException {
         if(channel==null)
-            return new AsyncFutureImpl<Map<String, String>>(Collections.singletonMap("N/A","offline"));
+            return new AsyncFutureImpl<>(Collections.singletonMap("N/A", "offline"));
         return channel.callAsync(new GetThreadDump());
     }
 
-    private static final class GetThreadDump implements Callable<Map<String,String>,RuntimeException> {
+    private static final class GetThreadDump extends MasterToSlaveCallable<Map<String,String>,RuntimeException> {
+        @Override
         public Map<String,String> call() {
-            Map<String,String> r = new LinkedHashMap<String,String>();
+            Map<String,String> r = new LinkedHashMap<>();
                 ThreadInfo[] data = Functions.getThreadInfos();
                 Functions.ThreadGroupMap map = Functions.sortThreadsAndGetGroupMap(data);
                 for (ThreadInfo ti : data)
@@ -104,11 +106,11 @@ public final class RemotingDiagnostics {
     /**
      * Executes Groovy script remotely.
      */
-    public static String executeGroovy(String script, VirtualChannel channel) throws IOException, InterruptedException {
+    public static String executeGroovy(String script, @NonNull VirtualChannel channel) throws IOException, InterruptedException {
         return channel.call(new Script(script));
     }
 
-    private static final class Script implements DelegatingCallable<String,RuntimeException> {
+    private static final class Script extends MasterToSlaveCallable<String,RuntimeException> implements DelegatingCallable<String,RuntimeException> {
         private final String script;
         private transient ClassLoader cl;
 
@@ -117,10 +119,12 @@ public final class RemotingDiagnostics {
             cl = getClassLoader();
         }
 
+        @Override
         public ClassLoader getClassLoader() {
-            return Jenkins.getInstance().getPluginManager().uberClassLoader;
+            return Jenkins.get().getPluginManager().uberClassLoader;
         }
 
+        @Override
         public String call() throws RuntimeException {
             // if we run locally, cl!=null. Otherwise the delegating classloader will be available as context classloader.
             if (cl==null)       cl = Thread.currentThread().getContextClassLoader();
@@ -140,7 +144,7 @@ public final class RemotingDiagnostics {
                 if(output!=null)
                 pw.println("Result: "+output);
             } catch (Throwable t) {
-                t.printStackTrace(pw);
+                Functions.printStackTrace(t, pw);
             }
             return out.toString();
         }
@@ -150,7 +154,10 @@ public final class RemotingDiagnostics {
      * Obtains the heap dump in an HPROF file.
      */
     public static FilePath getHeapDump(VirtualChannel channel) throws IOException, InterruptedException {
-        return channel.call(new Callable<FilePath, IOException>() {
+        return channel.call(new GetHeapDump());
+    }
+    private static class GetHeapDump extends MasterToSlaveCallable<FilePath, IOException> {
+            @Override
             public FilePath call() throws IOException {
                 final File hprof = File.createTempFile("hudson-heapdump", "hprof");
                 hprof.delete();
@@ -166,7 +173,6 @@ public final class RemotingDiagnostics {
             }
 
             private static final long serialVersionUID = 1L;
-        });
     }
 
     /**
@@ -191,7 +197,7 @@ public final class RemotingDiagnostics {
 
         @WebMethod(name="heapdump.hprof")
         public void doHeapDump(StaplerRequest req, StaplerResponse rsp) throws IOException, InterruptedException {
-            owner.checkPermission(Jenkins.RUN_SCRIPTS);
+            owner.checkPermission(Jenkins.ADMINISTER);
             rsp.setContentType("application/octet-stream");
 
             FilePath dump = obtain();

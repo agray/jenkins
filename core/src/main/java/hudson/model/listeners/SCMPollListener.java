@@ -25,11 +25,9 @@ package hudson.model.listeners;
 
 import hudson.ExtensionList;
 import hudson.ExtensionPoint;
-import hudson.scm.PollingResult;
-import jenkins.model.Jenkins;
 import hudson.model.AbstractProject;
 import hudson.model.TaskListener;
-
+import hudson.scm.PollingResult;
 import java.io.IOException;
 
 /**
@@ -48,6 +46,7 @@ public abstract class SCMPollListener implements ExtensionPoint {
      * @param listener
      *      Connected to the polling log.
      */
+    // TODO switch to Job
 	public void onBeforePolling( AbstractProject<?, ?> project, TaskListener listener ) {}
 
     /**
@@ -101,6 +100,6 @@ public abstract class SCMPollListener implements ExtensionPoint {
 	 * Returns all the registered {@link SCMPollListener}s.
 	 */
 	public static ExtensionList<SCMPollListener> all() {
-		return Jenkins.getInstance().getExtensionList( SCMPollListener.class );
+		return ExtensionList.lookup( SCMPollListener.class );
 	}
 }

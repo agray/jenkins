@@ -2,13 +2,10 @@ package hudson.node_monitors;
 
 import hudson.model.Computer;
 import hudson.node_monitors.DiskSpaceMonitorDescriptor.DiskSpace;
-
-import org.kohsuke.accmod.Restricted;
-import org.kohsuke.accmod.restrictions.NoExternalUse;
-import org.kohsuke.stapler.DataBoundConstructor;
-
 import java.text.ParseException;
 import java.util.logging.Logger;
+import org.kohsuke.accmod.Restricted;
+import org.kohsuke.accmod.restrictions.NoExternalUse;
 
 /**
  * @author Kohsuke Kawaguchi
@@ -21,7 +18,6 @@ public abstract class AbstractDiskSpaceMonitor extends NodeMonitor {
      */
     public final String freeSpaceThreshold;
 
-    @DataBoundConstructor
     public AbstractDiskSpaceMonitor(String threshold) throws ParseException {
         this.freeSpaceThreshold = threshold;
         DiskSpace.parse(threshold); // make sure it parses
@@ -49,7 +45,7 @@ public abstract class AbstractDiskSpaceMonitor extends NodeMonitor {
         if(size!=null && size.size > getThresholdBytes() && c.isOffline() && c.getOfflineCause() instanceof DiskSpace)
             if(this.getClass().equals(((DiskSpace)c.getOfflineCause()).getTrigger()))
                 if(getDescriptor().markOnline(c)) {
-                    LOGGER.warning(Messages.DiskSpaceMonitor_MarkedOnline(c.getName()));
+                    LOGGER.info(Messages.DiskSpaceMonitor_MarkedOnline(c.getDisplayName()));
                 }
         return size;
     }
@@ -66,7 +62,7 @@ public abstract class AbstractDiskSpaceMonitor extends NodeMonitor {
         if(size!=null && size.size < getThresholdBytes()) {
         	size.setTriggered(this.getClass(), true);
         	if(getDescriptor().markOffline(c,size)) {
-        		LOGGER.warning(Messages.DiskSpaceMonitor_MarkedOffline(c.getName()));
+        		LOGGER.warning(Messages.DiskSpaceMonitor_MarkedOffline(c.getDisplayName()));
         	}
         }
         return size;

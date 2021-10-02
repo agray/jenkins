@@ -25,16 +25,15 @@ package hudson.util.io;
  
 import hudson.ExtensionList;
 import hudson.ExtensionPoint;
-import hudson.remoting.Callable;
 import hudson.remoting.Channel;
-import jenkins.model.Jenkins;
-import org.dom4j.io.SAXReader;
-
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import jenkins.model.Jenkins;
+import jenkins.security.SlaveToMasterCallable;
+import org.dom4j.io.SAXReader;
 
 /**
  * Configures XML parsers to be used for various XML parsing activities inside Jenkins.
@@ -52,7 +51,9 @@ import java.util.Collections;
  *
  * @author Kohsuke Kawaguchi
  * @since 1.416
+ * @deprecated No longer used.
  */
+@Deprecated
 public abstract class ParserConfigurator implements ExtensionPoint, Serializable {
     private static final long serialVersionUID = -2523542286453177108L;
 
@@ -69,26 +70,26 @@ public abstract class ParserConfigurator implements ExtensionPoint, Serializable
      * Returns all the registered {@link ParserConfigurator}s.
      */
     public static ExtensionList<ParserConfigurator> all() {
-        return Jenkins.getInstance().getExtensionList(ParserConfigurator.class);
+        return ExtensionList.lookup(ParserConfigurator.class);
     }
 
     public static void applyConfiguration(SAXReader reader, Object context) throws IOException, InterruptedException {
         Collection<ParserConfigurator> all = Collections.emptyList();
 
-        if (Jenkins.getInstance()==null) {
+        if (Jenkins.getInstanceOrNull()==null) {
             Channel ch = Channel.current();
             if (ch!=null)
-                all = ch.call(new Callable<Collection<ParserConfigurator>, IOException>() {
-
-                    private static final long serialVersionUID = -2178106894481500733L;
-
-                    public Collection<ParserConfigurator> call() throws IOException {
-                        return new ArrayList<ParserConfigurator>(all());
-                    }
-                });
+                all = ch.call(new GetParserConfigurators());
         } else
             all = all();
         for (ParserConfigurator pc : all)
             pc.configure(reader,context);
+    }
+    private static class GetParserConfigurators extends SlaveToMasterCallable<Collection<ParserConfigurator>, IOException> {
+        private static final long serialVersionUID = -2178106894481500733L;
+        @Override
+        public Collection<ParserConfigurator> call() throws IOException {
+            return new ArrayList<>(all());
+        }
     }
 }

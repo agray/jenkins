@@ -23,9 +23,8 @@
  */
 package hudson.model;
 
-import org.jvnet.localizer.Localizable;
-
 import java.util.Locale;
+import org.jvnet.localizer.Localizable;
 
 /**
  * Describes an {@link Result} trend by taking the comparing the result of the current and the previous build.
@@ -75,7 +74,7 @@ public enum ResultTrend {
     
     private final Localizable description;
 
-    private ResultTrend(Localizable description) {
+    ResultTrend(Localizable description) {
         this.description = description;
     }
     

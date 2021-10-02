@@ -52,7 +52,7 @@ THE SOFTWARE.
       </div>
 
       <h1>
-        <img src="${imagesURL}/48x48/${it.icon}" width="48" height="48" alt=""/>
+        <l:icon class="${it.iconClassName} icon-xlg" />
         ${it.caption}
         <j:if test="${!empty(it.node.nodeDescription)}">
           <span style="font-size:smaller">(${it.node.nodeDescription})</span>
@@ -71,22 +71,6 @@ THE SOFTWARE.
         <p>${%title.no_manual_launch(it.retentionStrategy.descriptor.displayName)}</p>
       </j:if>
 
-     <!-- Display user which created this node -->
-     <j:set var="user" value="${app.getUser(it.node.userId)}"/>
-     <j:if test="${it.node.userId !=null and user!=null}">
-       <p>
-          ${%Created by} 
-         <j:choose>
-            <j:when test="${it.node.userId.equals('anonymous')}">
-             ${%anonymous user}
-            </j:when>
-           <j:otherwise>
-             <a href="${app.rootUrl}${user.url}">${user.displayName}</a>
-            </j:otherwise>
-         </j:choose>
-       </p>
-      </j:if>
-
         <j:if test="${it.node.assignedLabels.size() gt 1}">
         <div>
           <h2>${%Labels}</h2>
@@ -94,6 +78,7 @@ THE SOFTWARE.
             <!-- Skip the label for this node -->
             <j:if test="${entry.item!=it.node.selfLabel}">
               <a class="${entry.className} model-link inside" href="${rootURL}/label/${entry.item.name}">${entry.item.name}</a>
+              <wbr/>
             </j:if>
           </j:forEach>
         </div>

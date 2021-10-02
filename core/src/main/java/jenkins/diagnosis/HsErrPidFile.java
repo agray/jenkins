@@ -2,12 +2,12 @@ package jenkins.diagnosis;
 
 import hudson.Util;
 import hudson.util.HttpResponses;
-import jenkins.model.Jenkins;
-import org.kohsuke.stapler.HttpResponse;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.Date;
+import jenkins.model.Jenkins;
+import org.kohsuke.stapler.HttpResponse;
+import org.kohsuke.stapler.interceptor.RequirePOST;
 
 /**
  * Serves hs_err_pid file.
@@ -44,12 +44,13 @@ public class HsErrPidFile {
     }
 
     public HttpResponse doDownload() throws IOException {
-        Jenkins.getInstance().checkPermission(Jenkins.ADMINISTER);
+        Jenkins.get().checkPermission(Jenkins.ADMINISTER);
         return HttpResponses.staticResource(file);
     }
 
+    @RequirePOST
     public HttpResponse doDelete() throws IOException {
-        Jenkins.getInstance().checkPermission(Jenkins.ADMINISTER);
+        Jenkins.get().checkPermission(Jenkins.ADMINISTER);
         file.delete();
         owner.files.remove(this);
         return HttpResponses.redirectTo("../..");

@@ -24,13 +24,17 @@
 
 package jenkins.management;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
 import hudson.model.ManagementLink;
+import hudson.security.Permission;
+import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
 
 /**
  * @author <a href="mailto:nicolas.deloof@gmail.com">Nicolas De Loof</a>
  */
-@Extension(ordinal = Integer.MAX_VALUE - 700)
+@Extension(ordinal = Integer.MAX_VALUE - 700) @Symbol("loadStatistics")
 public class StatisticsLink extends ManagementLink {
 
     @Override
@@ -38,6 +42,7 @@ public class StatisticsLink extends ManagementLink {
         return "monitor.png";
     }
 
+    @Override
     public String getDisplayName() {
         return Messages.StatisticsLink_DisplayName();
     }
@@ -47,8 +52,20 @@ public class StatisticsLink extends ManagementLink {
         return Messages.StatisticsLink_Description();
     }
 
+    @NonNull
+    @Override
+    public Permission getRequiredPermission() {
+        return Jenkins.MANAGE;
+    }
+
     @Override
     public String getUrlName() {
         return "load-statistics";
+    }
+
+    @NonNull
+    @Override
+    public Category getCategory() {
+        return Category.STATUS;
     }
 }

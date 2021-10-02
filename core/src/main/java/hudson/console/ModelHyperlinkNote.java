@@ -1,15 +1,17 @@
 package hudson.console;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.Extension;
+import hudson.model.Computer;
 import hudson.model.Item;
+import hudson.model.Label;
 import hudson.model.ModelObject;
 import hudson.model.Node;
 import hudson.model.Run;
 import hudson.model.User;
-
-import java.io.IOException;
-import java.util.logging.Level;
 import java.util.logging.Logger;
+import jenkins.model.Jenkins;
+import org.jenkinsci.Symbol;
 
 /**
  * {@link HyperlinkNote} that links to a {@linkplain ModelObject model object},
@@ -28,7 +30,7 @@ public class ModelHyperlinkNote extends HyperlinkNote {
         return " class='model-link'";
     }
 
-    public static String encodeTo(User u) {
+    public static String encodeTo(@NonNull User u) {
         return encodeTo(u,u.getDisplayName());
     }
 
@@ -37,7 +39,7 @@ public class ModelHyperlinkNote extends HyperlinkNote {
     }
 
     public static String encodeTo(Item item) {
-        return encodeTo(item,item.getDisplayName());
+        return encodeTo(item,item.getFullDisplayName());
     }
 
     public static String encodeTo(Item item, String text) {
@@ -49,21 +51,28 @@ public class ModelHyperlinkNote extends HyperlinkNote {
     }
 
     public static String encodeTo(Node node) {
-        return encodeTo("/computer/"+ node.getNodeName(), node.getDisplayName());
+        Computer c = node.toComputer();
+        if (c != null) {
+            return encodeTo("/" + c.getUrl(), node.getDisplayName());
+        }
+        String nodePath = node == Jenkins.get() ? "(built-in)" : node.getNodeName();
+        return encodeTo("/computer/" + nodePath, node.getDisplayName());
+    }
+
+    /**
+     * @since 2.230
+     */
+    public static String encodeTo(Label label) {
+        return encodeTo("/" + label.getUrl(), label.getName());
     }
 
     public static String encodeTo(String url, String text) {
-        try {
-            return new ModelHyperlinkNote(url,text.length()).encode()+text;
-        } catch (IOException e) {
-            // impossible, but don't make this a fatal problem
-            LOGGER.log(Level.WARNING, "Failed to serialize "+ModelHyperlinkNote.class,e);
-            return text;
-        }
+        return HyperlinkNote.encodeTo(url, text, ModelHyperlinkNote::new);
     }
 
-    @Extension
+    @Extension @Symbol("hyperlinkToModels")
     public static class DescriptorImpl extends HyperlinkNote.DescriptorImpl {
+        @Override
         public String getDisplayName() {
             return "Hyperlinks to models";
         }

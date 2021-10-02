@@ -25,20 +25,22 @@ package hudson.model;
 
 import com.thoughtworks.xstream.converters.SingleValueConverter;
 import com.thoughtworks.xstream.converters.basic.AbstractSingleValueConverter;
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.cli.declarative.OptionHandlerExtension;
 import hudson.init.Initializer;
 import hudson.util.EditDistance;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
 import org.apache.commons.beanutils.Converter;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.OptionDef;
-import org.kohsuke.args4j.spi.*;
+import org.kohsuke.args4j.spi.OptionHandler;
+import org.kohsuke.args4j.spi.Parameters;
+import org.kohsuke.args4j.spi.Setter;
 import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.export.CustomExportedBean;
-
-import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.List;
 
 /**
  * The build outcome.
@@ -49,42 +51,42 @@ public final class Result implements Serializable, CustomExportedBean {
     /**
      * The build had no errors.
      */
-    public static final Result SUCCESS = new Result("SUCCESS",BallColor.BLUE,0,true);
+    public static final @NonNull Result SUCCESS = new Result("SUCCESS",BallColor.BLUE,0,true);
     /**
      * The build had some errors but they were not fatal.
      * For example, some tests failed.
      */
-    public static final Result UNSTABLE = new Result("UNSTABLE",BallColor.YELLOW,1,true);
+    public static final @NonNull Result UNSTABLE = new Result("UNSTABLE",BallColor.YELLOW,1,true);
     /**
      * The build had a fatal error.
      */
-    public static final Result FAILURE = new Result("FAILURE",BallColor.RED,2,true);
+    public static final @NonNull Result FAILURE = new Result("FAILURE",BallColor.RED,2,true);
     /**
      * The module was not built.
      * <p>
      * This status code is used in a multi-stage build (like maven2)
      * where a problem in earlier stage prevented later stages from building.
      */
-    public static final Result NOT_BUILT = new Result("NOT_BUILT",BallColor.NOTBUILT,3,false);
+    public static final @NonNull Result NOT_BUILT = new Result("NOT_BUILT",BallColor.NOTBUILT,3,false);
     /**
      * The build was manually aborted.
      *
      * If you are catching {@link InterruptedException} and interpreting it as {@link #ABORTED},
      * you should check {@link Executor#abortResult()} instead (starting 1.417.)
      */
-    public static final Result ABORTED = new Result("ABORTED",BallColor.ABORTED,4,false);
+    public static final @NonNull Result ABORTED = new Result("ABORTED",BallColor.ABORTED,4,false);
 
-    private final String name;
+    private final @NonNull String name;
 
     /**
      * Bigger numbers are worse.
      */
-    public final int ordinal;
+    public final /* @java.annotation.Nonnegative */ int ordinal;
 
     /**
      * Default ball color for this status.
      */
-    public final BallColor color;
+    public final @NonNull BallColor color;
     
     /**
      * Is this a complete build - i.e. did it run to the end (not aborted)?
@@ -92,7 +94,7 @@ public final class Result implements Serializable, CustomExportedBean {
      */
     public final boolean completeBuild;
 
-    private Result(String name, BallColor color, int ordinal, boolean complete) {
+    private Result(@NonNull String name, @NonNull BallColor color, /*@java.annotation.Nonnegative */int ordinal, boolean complete) {
         this.name = name;
         this.color = color;
         this.ordinal = ordinal;
@@ -102,26 +104,49 @@ public final class Result implements Serializable, CustomExportedBean {
     /**
      * Combines two {@link Result}s and returns the worse one.
      */
-    public Result combine(Result that) {
+    public @NonNull Result combine(@NonNull Result that) {
         if(this.ordinal < that.ordinal)
             return that;
         else
             return this;
     }
 
-    public boolean isWorseThan(Result that) {
+    /**
+     * Combines two {@link Result}s and returns the worse one.
+     * <p>
+     * This method is null-safe (any {@link Result} is "worse" than {@code null}, and {@code null} is returned if both
+     * parameters are {@code null}).
+     *
+     * @param r1
+     *      a result (may be {@code null})
+     * @param r2
+     *      a result (may be {@code null})
+     * @return the worst result (may be {@code null})
+     * @since 2.257
+     */
+    public static Result combine(Result r1, Result r2) {
+        if (r1 == null) {
+            return r2;
+        } else if (r2 == null) {
+            return r1;
+        } else {
+            return r1.combine(r2);
+        }
+    }
+
+    public boolean isWorseThan(@NonNull Result that) {
         return this.ordinal > that.ordinal;
     }
 
-    public boolean isWorseOrEqualTo(Result that) {
+    public boolean isWorseOrEqualTo(@NonNull Result that) {
         return this.ordinal >= that.ordinal;
     }
 
-    public boolean isBetterThan(Result that) {
+    public boolean isBetterThan(@NonNull Result that) {
         return this.ordinal < that.ordinal;
     }
 
-    public boolean isBetterOrEqualTo(Result that) {
+    public boolean isBetterOrEqualTo(@NonNull Result that) {
         return this.ordinal <= that.ordinal;
     }
     
@@ -133,31 +158,31 @@ public final class Result implements Serializable, CustomExportedBean {
         return this.completeBuild;
     }
 
-
     @Override
-    public String toString() {
+    public @NonNull String toString() {
         return name;
     }
 
-    public String toExportedObject() {
+    @Override
+    public @NonNull String toExportedObject() {
         return name;
     }
     
-    public static Result fromString(String s) {
+    public static @NonNull Result fromString(@NonNull String s) {
         for (Result r : all)
             if (s.equalsIgnoreCase(r.name))
                 return r;
         return FAILURE;
     }
 
-    private static List<String> getNames() {
-        List<String> l = new ArrayList<String>();
+    private static @NonNull List<String> getNames() {
+        List<String> l = new ArrayList<>();
         for (Result r : all)
             l.add(r.name);
         return l;
     }
 
-    // Maintain each Result as a singleton deserialized (like build result from a slave node)
+    // Maintain each Result as a singleton deserialized (like build result from an agent node)
     private Object readResolve() {
         for (Result r : all)
             if (ordinal==r.ordinal)
@@ -170,10 +195,12 @@ public final class Result implements Serializable, CustomExportedBean {
     private static final Result[] all = new Result[] {SUCCESS,UNSTABLE,FAILURE,NOT_BUILT,ABORTED};
 
     public static final SingleValueConverter conv = new AbstractSingleValueConverter () {
+        @Override
         public boolean canConvert(Class clazz) {
             return clazz==Result.class;
         }
 
+        @Override
         public Object fromString(String s) {
             return Result.fromString(s);
         }
@@ -189,9 +216,10 @@ public final class Result implements Serializable, CustomExportedBean {
         public int parseArguments(Parameters params) throws CmdLineException {
             String param = params.getParameter(0);
             Result v = fromString(param.replace('-', '_'));
-            if (v==null)
+            if (v== FAILURE) {
                 throw new CmdLineException(owner,"No such status '"+param+"'. Did you mean "+
                         EditDistance.findNearest(param.replace('-', '_').toUpperCase(), getNames()));
+            }
             setter.addValue(v);
             return 1;
         }
@@ -205,6 +233,7 @@ public final class Result implements Serializable, CustomExportedBean {
     @Initializer
     public static void init() {
         Stapler.CONVERT_UTILS.register(new Converter() {
+            @Override
             public Object convert(Class type, Object value) {
                 return Result.fromString(value.toString());
             }

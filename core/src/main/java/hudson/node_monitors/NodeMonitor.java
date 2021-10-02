@@ -23,21 +23,19 @@
  */
 package hudson.node_monitors;
 
-import hudson.ExtensionPoint;
+import edu.umd.cs.findbugs.annotations.CheckForNull;
 import hudson.DescriptorExtensionList;
 import hudson.Extension;
-import hudson.tasks.Publisher;
+import hudson.ExtensionPoint;
 import hudson.model.Computer;
 import hudson.model.ComputerSet;
 import hudson.model.Describable;
-import hudson.model.Node;
-import jenkins.model.Jenkins;
 import hudson.model.Descriptor;
+import hudson.model.Node;
+import hudson.tasks.Publisher;
 import hudson.util.DescriptorList;
-
 import java.util.List;
-import javax.annotation.CheckForNull;
-
+import jenkins.model.Jenkins;
 import org.kohsuke.stapler.export.Exported;
 import org.kohsuke.stapler.export.ExportedBean;
 
@@ -48,7 +46,7 @@ import org.kohsuke.stapler.export.ExportedBean;
  * <dl>
  * <dt>column.jelly</dt>
  * <dd>
- * Invoked from {@link ComputerSet} <tt>index.jelly</tt> to render a column.
+ * Invoked from {@link ComputerSet} {@code index.jelly} to render a column.
  * The {@link NodeMonitor} instance is accessible through the "from" variable.
  * Also see {@link #getColumnCaption()}.
  *
@@ -80,8 +78,9 @@ public abstract class NodeMonitor implements ExtensionPoint, Describable<NodeMon
         return getDescriptor().getDisplayName();
     }
 
+    @Override
     public AbstractNodeMonitorDescriptor<?> getDescriptor() {
-        return (AbstractNodeMonitorDescriptor<?>) Jenkins.getInstance().getDescriptorOrDie(getClass());
+        return (AbstractNodeMonitorDescriptor<?>) Jenkins.get().getDescriptorOrDie(getClass());
     }
 
     /**
@@ -114,11 +113,11 @@ public abstract class NodeMonitor implements ExtensionPoint, Describable<NodeMon
     }
 
     /**
-     * True if this monitoring shouldn't mark the slaves offline.
+     * True if this monitoring shouldn't mark the agents offline.
      *
      * <p>
      * Many {@link NodeMonitor}s implement a logic that if the value goes above/below
-     * a threshold, the slave will be marked offline as a preventive measure.
+     * a threshold, the agent will be marked offline as a preventive measure.
      * This flag controls that.
      *
      * <p>
@@ -139,12 +138,13 @@ public abstract class NodeMonitor implements ExtensionPoint, Describable<NodeMon
      * @deprecated as of 1.286.
      *      Use {@link #all()} for read access and {@link Extension} for registration.
      */
-    public static final DescriptorList<NodeMonitor> LIST = new DescriptorList<NodeMonitor>(NodeMonitor.class);
+    @Deprecated
+    public static final DescriptorList<NodeMonitor> LIST = new DescriptorList<>(NodeMonitor.class);
 
     /**
      * Returns all the registered {@link NodeMonitor} descriptors.
      */
     public static DescriptorExtensionList<NodeMonitor,Descriptor<NodeMonitor>> all() {
-        return Jenkins.getInstance().<NodeMonitor,Descriptor<NodeMonitor>>getDescriptorList(NodeMonitor.class);
+        return Jenkins.get().getDescriptorList(NodeMonitor.class);
     }
 }

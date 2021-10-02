@@ -8,14 +8,28 @@ work
 .idea
 out
 
-# eclipse project file
+# Eclipse and VSCode project files
 .settings
 .classpath
 .project
+.factorypath
 build
+
+# VSCode workspace file
+*.code-workspace
 
 # vim
 *~
+*.swp
+
+# ctags
+tags
+
+# OS X
+.DS_Store
+
+# mvn versions:set
+pom.xml.versionsBackup
 
 war/images/16x16
 war/images/24x24
@@ -39,4 +53,6 @@ jenkins_*.changes
 *.zip
 push-build.sh
 war/node_modules/
+war/yarn-error.log
 .java-version
+.checkstyle

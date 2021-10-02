@@ -1,20 +1,21 @@
 package jenkins.util.groovy;
 
+import static java.util.logging.Level.WARNING;
+
+import edu.umd.cs.findbugs.annotations.NonNull;
 import groovy.lang.Binding;
 import groovy.lang.GroovyCodeSource;
 import groovy.lang.GroovyShell;
-import jenkins.model.Jenkins;
-
 import java.io.File;
-import java.io.FileFilter;
 import java.io.IOException;
 import java.net.URL;
 import java.util.Arrays;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.logging.Logger;
-
-import static java.util.logging.Level.WARNING;
+import javax.servlet.ServletContext;
+import jenkins.model.Jenkins;
+import jenkins.util.SystemProperties;
 
 /**
  * A collection of Groovy scripts that are executed as various hooks.
@@ -27,22 +28,38 @@ import static java.util.logging.Level.WARNING;
  * <li>/WEB-INF/<i>HOOK</i>.groovy in the war file
  * <li>/WEB-INF/<i>HOOK</i>.groovy.d/*.groovy in the war file
  * <li>$JENKINS_HOME/<i>HOOK</i>.groovy
- * <il>$JENKINS_HOME/<i>HOOK</i>.groovy.d/*.groovy
+ * <li>$JENKINS_HOME/<i>HOOK</i>.groovy.d/*.groovy
  * </ol>
  *
  * <p>
- * Scripts inside <tt>/WEB-INF</tt> is meant for OEM distributions of Jenkins. Files inside
- * <tt>$JENKINS_HOME</tt> are for installation local settings. Use of <tt>HOOK.groovy.d</tt>
+ * Scripts inside {@code /WEB-INF} is meant for OEM distributions of Jenkins. Files inside
+ * {@code $JENKINS_HOME} are for installation local settings. Use of {@code HOOK.groovy.d}
  * allows configuration management tools to control scripts easily.
  *
  * @author Kohsuke Kawaguchi
  */
 public class GroovyHookScript {
+    private static final String ROOT_PATH = SystemProperties.getString(GroovyHookScript.class.getName() + ".ROOT_PATH");
     private final String hook;
     private final Binding bindings = new Binding();
+    private final ServletContext servletContext;
+    private final File rootDir;
+    private final ClassLoader loader;
 
+    @Deprecated
     public GroovyHookScript(String hook) {
+        this(hook, Jenkins.get());
+    }
+
+    private GroovyHookScript(String hook, Jenkins j) {
+        this(hook, j.servletContext, j.getRootDir(), j.getPluginManager().uberClassLoader);
+    }
+
+    public GroovyHookScript(String hook, @NonNull ServletContext servletContext, @NonNull File jenkinsHome, @NonNull ClassLoader loader) {
         this.hook = hook;
+        this.servletContext = servletContext;
+        this.rootDir = ROOT_PATH != null ? new File(ROOT_PATH) : jenkinsHome;
+        this.loader = loader;
     }
 
     public GroovyHookScript bind(String name, Object o) {
@@ -55,23 +72,22 @@ public class GroovyHookScript {
     }
 
     public void run() {
-        Jenkins j = Jenkins.getInstance();
         final String hookGroovy = hook+".groovy";
         final String hookGroovyD = hook+".groovy.d";
 
         try {
-            URL bundled = j.servletContext.getResource("/WEB-INF/"+ hookGroovy);
+            URL bundled = servletContext.getResource("/WEB-INF/"+ hookGroovy);
             execute(bundled);
         } catch (IOException e) {
             LOGGER.log(WARNING, "Failed to execute /WEB-INF/"+hookGroovy,e);
         }
 
-        Set<String> resources = j.servletContext.getResourcePaths("/WEB-INF/"+ hookGroovyD +"/");
+        Set<String> resources = servletContext.getResourcePaths("/WEB-INF/"+ hookGroovyD +"/");
         if (resources!=null) {
             // sort to execute them in a deterministic order
-            for (String res : new TreeSet<String>(resources)) {
+            for (String res : new TreeSet<>(resources)) {
                 try {
-                    URL bundled = j.servletContext.getResource(res);
+                    URL bundled = servletContext.getResource(res);
                     execute(bundled);
                 } catch (IOException e) {
                     LOGGER.log(WARNING, "Failed to execute " + res, e);
@@ -79,16 +95,12 @@ public class GroovyHookScript {
             }
         }
 
-        File script = new File(j.getRootDir(), hookGroovy);
+        File script = new File(rootDir, hookGroovy);
         execute(script);
 
-        File scriptD = new File(j.getRootDir(), hookGroovyD);
+        File scriptD = new File(rootDir, hookGroovyD);
         if (scriptD.isDirectory()) {
-            File[] scripts = scriptD.listFiles(new FileFilter() {
-                public boolean accept(File f) {
-                    return f.getName().endsWith(".groovy");
-                }
-            });
+            File[] scripts = scriptD.listFiles(f -> f.getName().endsWith(".groovy"));
             if (scripts!=null) {
                 // sort to run them in a deterministic order
                 Arrays.sort(scripts);
@@ -129,7 +141,7 @@ public class GroovyHookScript {
      * Can be used to customize the environment in which the script runs.
      */
     protected GroovyShell createShell() {
-        return new GroovyShell(Jenkins.getInstance().getPluginManager().uberClassLoader, bindings);
+        return new GroovyShell(loader, bindings);
     }
 
     private static final Logger LOGGER = Logger.getLogger(GroovyHookScript.class.getName());

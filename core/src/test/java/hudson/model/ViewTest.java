@@ -1,21 +1,22 @@
 package hudson.model;
 
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+
 import hudson.model.Descriptor.FormException;
 import hudson.search.SearchIndex;
 import hudson.search.SearchIndexBuilder;
 import hudson.search.SearchItem;
 import hudson.views.ViewsTabBar;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
-
 import javax.servlet.ServletException;
-
-import org.junit.Assert;
 import org.junit.Test;
+import org.jvnet.hudson.test.Issue;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
 import org.mockito.Mockito;
@@ -41,7 +42,7 @@ public class ViewTest {
         TopLevelItem item2 = Mockito.mock(TopLevelItem.class);
         Mockito.when(item2.getSearchUrl()).thenReturn(url2);
         Mockito.when(item2.getDisplayName()).thenReturn(displayName2);
-        Collection<TopLevelItem> items = new ArrayList<TopLevelItem>();
+        Collection<TopLevelItem> items = new ArrayList<>();
         items.add(item1);
         items.add(item2);
         
@@ -57,28 +58,28 @@ public class ViewTest {
         SearchIndex index = sib.make();
         
         // now make sure we can fetch item1 from the index
-        List<SearchItem> result = new ArrayList<SearchItem>();
+        List<SearchItem> result = new ArrayList<>();
         index.find(displayName1, result);
-        Assert.assertEquals(1, result.size());
+        assertEquals(1, result.size());
         SearchItem actual = result.get(0);
-        Assert.assertEquals(actual.getSearchName(), item1.getDisplayName());
-        Assert.assertEquals(actual.getSearchUrl(), item1.getSearchUrl());
+        assertEquals(actual.getSearchName(), item1.getDisplayName());
+        assertEquals(actual.getSearchUrl(), item1.getSearchUrl());
 
         // clear the result array for the next search result to test
         result.clear();
         // make sure we can fetch item 2 from the index
         index.find(displayName2, result);
-        Assert.assertEquals(1, result.size());
+        assertEquals(1, result.size());
         actual = result.get(0);
-        Assert.assertEquals(actual.getSearchName(), item2.getDisplayName());
-        Assert.assertEquals(actual.getSearchUrl(), item2.getSearchUrl());
+        assertEquals(actual.getSearchName(), item2.getDisplayName());
+        assertEquals(actual.getSearchUrl(), item2.getSearchUrl());
     }
 
     /*
      * Get all items recursively when View implements ViewGroup at the same time
      */
     @Test
-    public void getAllItems() throws Exception {
+    public void getAllItems() {
 
         final View leftView = Mockito.mock(View.class);
         final View rightView = Mockito.mock(View.class);
@@ -96,11 +97,27 @@ public class ViewTest {
         final TopLevelItem rightJob = createJob("rightJob");
 
         Mockito.when(leftView.getItems()).thenReturn(Arrays.asList(leftJob, sharedJob));
-        Mockito.when(rightView.getItems()).thenReturn(Arrays.asList(rightJob));
+        Mockito.when(rightView.getItems()).thenReturn(Collections.singletonList(rightJob));
 
         final TopLevelItem[] expected = new TopLevelItem[] {rootJob, sharedJob, leftJob, rightJob};
 
-        Assert.assertArrayEquals(expected, rootView.getAllItems().toArray());
+        assertArrayEquals(expected, rootView.getAllItems().toArray());
+    }
+
+    @Test
+    @Issue("JENKINS-43322")
+    public void getAllViewsRecursively() {
+        //given
+        View left2ndNestedView = Mockito.mock(View.class);
+        View right2ndNestedView = Mockito.mock(View.class);
+        CompositeView rightNestedGroupView = new CompositeView("rightNestedGroupView", left2ndNestedView, right2ndNestedView);
+        //and
+        View leftTopLevelView = Mockito.mock(View.class);
+        CompositeView rootView = new CompositeView("rootGroupView", leftTopLevelView, rightNestedGroupView);
+        //when
+        Collection<View> allViews = rootView.getAllViews();
+        //then
+        assertEquals(4, allViews.size());
     }
 
     private TopLevelItem createJob(String jobName) {
@@ -149,11 +166,6 @@ public class ViewTest {
         }
 
         @Override
-        public View getPrimaryView() {
-            return null;
-        }
-
-        @Override
         public void onViewRenamed(View view, String oldName, String newName) {
         }
 
@@ -182,7 +194,7 @@ public class ViewTest {
         }
 
         @Override
-        public Item doCreateItem(StaplerRequest req, StaplerResponse rsp) throws IOException, ServletException {
+        public Item doCreateItem(StaplerRequest req, StaplerResponse rsp) {
             return null;
         }
     }

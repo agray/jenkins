@@ -23,17 +23,20 @@
  */
 package hudson.lifecycle;
 
-import com.sun.akuma.JavaVMArguments;
-import com.sun.akuma.Daemon;
+import static hudson.util.jna.GNUCLibrary.FD_CLOEXEC;
+import static hudson.util.jna.GNUCLibrary.F_GETFD;
+import static hudson.util.jna.GNUCLibrary.F_SETFD;
+import static hudson.util.jna.GNUCLibrary.LIBC;
+
 import com.sun.jna.Native;
 import com.sun.jna.StringArray;
-
-import java.io.IOException;
-
-import static hudson.util.jna.GNUCLibrary.*;
-
 import hudson.Platform;
+import java.io.IOException;
+import java.util.List;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import jenkins.model.Jenkins;
+import jenkins.util.JavaVMArguments;
 
 /**
  * {@link Lifecycle} implementation when Hudson runs on the embedded
@@ -46,29 +49,28 @@ import jenkins.model.Jenkins;
  * @since 1.304
  */
 public class UnixLifecycle extends Lifecycle {
-    private JavaVMArguments args;
+    private List<String> args;
     private Throwable failedToObtainArgs;
 
     public UnixLifecycle() throws IOException {
         try {
             args = JavaVMArguments.current();
-
-            // if we are running as daemon, don't fork into background one more time during restart
-            args.remove("--daemon");
-        } catch (UnsupportedOperationException e) {
-            // can't restart
-            failedToObtainArgs = e;
-        } catch (LinkageError e) {
-            // see HUDSON-3875
+        } catch (UnsupportedOperationException | LinkageError e) {
+            // can't restart / see JENKINS-3875
             failedToObtainArgs = e;
         }
     }
 
     @Override
     public void restart() throws IOException, InterruptedException {
-        Jenkins h = Jenkins.getInstance();
-        if (h != null)
-            h.cleanUp();
+        Jenkins jenkins = Jenkins.getInstanceOrNull(); // guard against repeated concurrent calls to restart
+        try {
+            if (jenkins != null) {
+                jenkins.cleanUp();
+            }
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to clean up. Restart will continue.", e);
+        }
 
         // close all files upon exec, except stdin, stdout, and stderr
         int sz = LIBC.getdtablesize();
@@ -80,7 +82,7 @@ public class UnixLifecycle extends Lifecycle {
 
         // exec to self
         String exe = args.get(0);
-        LIBC.execvp(exe, new StringArray(args.toArray(new String[args.size()])));
+        LIBC.execvp(exe, new StringArray(args.toArray(new String[0])));
         throw new IOException("Failed to exec '"+exe+"' "+LIBC.strerror(Native.getLastError()));
     }
 
@@ -97,4 +99,6 @@ public class UnixLifecycle extends Lifecycle {
         if (args==null)
             throw new RestartNotSupportedException("Failed to obtain the command line arguments of the process",failedToObtainArgs);
     }
+
+    private static final Logger LOGGER = Logger.getLogger(UnixLifecycle.class.getName());
 }

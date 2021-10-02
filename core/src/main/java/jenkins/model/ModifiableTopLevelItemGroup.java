@@ -26,7 +26,6 @@ package jenkins.model;
 import hudson.model.ModifiableItemGroup;
 import hudson.model.TopLevelItem;
 import hudson.model.TopLevelItemDescriptor;
-
 import java.io.IOException;
 import java.io.InputStream;
 
@@ -40,7 +39,7 @@ import java.io.InputStream;
 public interface ModifiableTopLevelItemGroup extends ModifiableItemGroup<TopLevelItem> {
 
     /**
-     * Copys a job.
+     * Copies a job.
      *
      * @param src
      *      A {@link TopLevelItem} to be copied.
@@ -52,9 +51,9 @@ public interface ModifiableTopLevelItemGroup extends ModifiableItemGroup<TopLeve
     <T extends TopLevelItem> T copy(T src, String name) throws IOException;
 
     /**
-     * /**
      * Creates a new job from its configuration XML. The type of the job created will be determined by
      * what's in this XML.
+     *
      * @param name
      *      Name of the newly created project.
      * @param xml
@@ -66,6 +65,7 @@ public interface ModifiableTopLevelItemGroup extends ModifiableItemGroup<TopLeve
 
     /**
      * Creates a new job.
+     *
      * @param type Descriptor for job type
      * @param name Name for job
      * @param notify Whether to fire onCreated method for all ItemListeners

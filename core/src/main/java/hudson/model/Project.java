@@ -26,28 +26,33 @@ package hudson.model;
 
 import hudson.Util;
 import hudson.model.Descriptor.FormException;
+import hudson.scm.SCM;
 import hudson.tasks.BuildStep;
 import hudson.tasks.BuildWrapper;
 import hudson.tasks.BuildWrappers;
 import hudson.tasks.Builder;
 import hudson.tasks.Fingerprinter;
-import hudson.tasks.Publisher;
 import hudson.tasks.Maven;
-import hudson.tasks.Maven.ProjectWithMaven;
 import hudson.tasks.Maven.MavenInstallation;
+import hudson.tasks.Maven.ProjectWithMaven;
+import hudson.tasks.Publisher;
+import hudson.triggers.SCMTrigger;
 import hudson.triggers.Trigger;
 import hudson.util.DescribableList;
-import net.sf.json.JSONObject;
-import org.kohsuke.stapler.StaplerRequest;
-import org.kohsuke.stapler.StaplerResponse;
-
-import javax.servlet.ServletException;
 import java.io.IOException;
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import javax.servlet.ServletException;
+import jenkins.triggers.SCMTriggerItem;
+import net.sf.json.JSONObject;
+import org.kohsuke.stapler.StaplerRequest;
+import org.kohsuke.stapler.StaplerResponse;
 
 /**
  * Buildable software project.
@@ -55,7 +60,7 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
  * @author Kohsuke Kawaguchi
  */
 public abstract class Project<P extends Project<P,B>,B extends Build<P,B>>
-    extends AbstractProject<P,B> implements SCMedItem, Saveable, ProjectWithMaven, BuildableItemWithBuildWrappers {
+    extends AbstractProject<P,B> implements SCMTriggerItem, Saveable, ProjectWithMaven, BuildableItemWithBuildWrappers {
 
     /**
      * List of active {@link Builder}s configured for this project.
@@ -93,8 +98,21 @@ public abstract class Project<P extends Project<P,B>,B extends Build<P,B>>
         getBuildWrappersList().setOwner(this);
     }
 
+    @Override
     public AbstractProject<?, ?> asProject() {
         return this;
+    }
+
+    @Override public Item asItem() {
+        return this;
+    }
+
+    @Override public SCMTrigger getSCMTrigger() {
+        return getTrigger(SCMTrigger.class);
+    }
+
+    @Override public Collection<? extends SCM> getSCMs() {
+        return SCMTriggerItem.SCMTriggerItems.resolveMultiScmIfConfigured(getScm());
     }
 
     public List<Builder> getBuilders() {
@@ -106,6 +124,7 @@ public abstract class Project<P extends Project<P,B>,B extends Build<P,B>>
      *      We will be soon removing the restriction that only one instance of publisher is allowed per type.
      *      Use {@link #getPublishersList()} instead.
      */
+    @Deprecated
     public Map<Descriptor<Publisher>,Publisher> getPublishers() {
         return getPublishersList().toMap();
     }
@@ -117,6 +136,7 @@ public abstract class Project<P extends Project<P,B>,B extends Build<P,B>>
         return builders;
     }
     
+    @Override
     public DescribableList<Publisher,Descriptor<Publisher>> getPublishersList() {
         if (publishers == null) {
             publishersSetter.compareAndSet(this,null,new DescribableList<Publisher,Descriptor<Publisher>>(this));
@@ -128,6 +148,7 @@ public abstract class Project<P extends Project<P,B>,B extends Build<P,B>>
         return getBuildWrappersList().toMap();
     }
 
+    @Override
     public DescribableList<BuildWrapper, Descriptor<BuildWrapper>> getBuildWrappersList() {
         if (buildWrappers == null) {
             buildWrappersSetter.compareAndSet(this,null,new DescribableList<BuildWrapper,Descriptor<BuildWrapper>>(this));
@@ -137,7 +158,7 @@ public abstract class Project<P extends Project<P,B>,B extends Build<P,B>>
 
     @Override
     protected Set<ResourceActivity> getResourceActivities() {
-        final Set<ResourceActivity> activities = new HashSet<ResourceActivity>();
+        final Set<ResourceActivity> activities = new HashSet<>();
 
         activities.addAll(super.getResourceActivities());
         activities.addAll(Util.filter(getBuildersList(),ResourceActivity.class));
@@ -153,6 +174,7 @@ public abstract class Project<P extends Project<P,B>,B extends Build<P,B>>
      * @deprecated as of 1.290
      *      Use {@code getPublishersList().add(x)}
      */
+    @Deprecated
     public void addPublisher(Publisher buildStep) throws IOException {
         getPublishersList().add(buildStep);
     }
@@ -163,6 +185,7 @@ public abstract class Project<P extends Project<P,B>,B extends Build<P,B>>
      * @deprecated as of 1.290
      *      Use {@code getPublishersList().remove(x)}
      */
+    @Deprecated
     public void removePublisher(Descriptor<Publisher> descriptor) throws IOException {
         getPublishersList().remove(descriptor);
     }
@@ -187,6 +210,7 @@ public abstract class Project<P extends Project<P,B>,B extends Build<P,B>>
         return getPublishersList().get(Fingerprinter.class)!=null;
     }
 
+    @Override
     public MavenInstallation inferMavenInstallation() {
         Maven m = getBuildersList().get(Maven.class);
         if (m!=null)    return m.getMaven();
@@ -213,15 +237,37 @@ public abstract class Project<P extends Project<P,B>,B extends Build<P,B>>
     protected List<Action> createTransientActions() {
         List<Action> r = super.createTransientActions();
 
-        for (BuildStep step : getBuildersList())
-            r.addAll(step.getProjectActions(this));
-        for (BuildStep step : getPublishersList())
-            r.addAll(step.getProjectActions(this));
-        for (BuildWrapper step : getBuildWrappers().values())
-            r.addAll(step.getProjectActions(this));
-        for (Trigger trigger : triggers())
-            r.addAll(trigger.getProjectActions());
+        for (BuildStep step : getBuildersList()) {
+            try {
+                r.addAll(step.getProjectActions(this));
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Error loading build step.", e);
+            }
+        }
+        for (BuildStep step : getPublishersList()) {
+            try {
+                r.addAll(step.getProjectActions(this));
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Error loading publisher.", e);
+            }
+        }
+        for (BuildWrapper step : getBuildWrappers().values()) {
+            try {
+                r.addAll(step.getProjectActions(this));
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Error loading build wrapper.", e);
+            }
+        }
+        for (Trigger trigger : triggers()) {
+            try {
+                r.addAll(trigger.getProjectActions());
+            } catch (Exception e) {
+                LOGGER.log(Level.SEVERE, "Error loading trigger.", e);
+            }
+        }
 
         return r;
     }
+
+    private static final Logger LOGGER = Logger.getLogger(Project.class.getName());
 }

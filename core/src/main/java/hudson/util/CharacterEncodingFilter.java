@@ -33,6 +33,7 @@ import javax.servlet.ServletException;
 import javax.servlet.ServletRequest;
 import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
+import jenkins.util.SystemProperties;
 
 /**
  * Filter that sets the character encoding to be used in parsing the request
@@ -48,24 +49,27 @@ public class CharacterEncodingFilter implements Filter {
     private static final String ENCODING = "UTF-8";
 
     private static final Boolean DISABLE_FILTER
-            = Boolean.getBoolean(CharacterEncodingFilter.class.getName() + ".disableFilter");
+            = SystemProperties.getBoolean(CharacterEncodingFilter.class.getName() + ".disableFilter");
 
     /**
      * The character encoding sets forcibly?
      */
     private static final Boolean FORCE_ENCODING
-            = Boolean.getBoolean(CharacterEncodingFilter.class.getName() + ".forceEncoding");
+            = SystemProperties.getBoolean(CharacterEncodingFilter.class.getName() + ".forceEncoding");
 
+    @Override
     public void init(FilterConfig filterConfig) throws ServletException {
         LOGGER.log(Level.FINE,
                 "CharacterEncodingFilter initialized. DISABLE_FILTER: {0} FORCE_ENCODING: {1}",
                 new Object[]{DISABLE_FILTER, FORCE_ENCODING});
     }
 
+    @Override
     public void destroy() {
         LOGGER.fine("CharacterEncodingFilter destroyed.");
     }
 
+    @Override
     public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
             throws IOException, ServletException {
 
@@ -89,7 +93,7 @@ public class CharacterEncodingFilter implements Filter {
 
         // containers often implement RFCs incorrectly in that it doesn't interpret query parameter
         // decoding with UTF-8. This will ensure we get it right.
-        // but doing this for config.xml submission could potentiall overwrite valid
+        // but doing this for config.xml submission could potentially overwrite valid
         // "text/xml;charset=xxx"
         String contentType = req.getContentType();
         if (contentType != null) {
@@ -99,11 +103,7 @@ public class CharacterEncodingFilter implements Filter {
             }
         }
 
-        if (FORCE_ENCODING || req.getCharacterEncoding() == null) {
-            return true;
-        }
-        
-        return false;
+        return FORCE_ENCODING || req.getCharacterEncoding() == null;
     }
 
     private static final Logger LOGGER = Logger.getLogger(CharacterEncodingFilter.class.getName());

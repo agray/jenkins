@@ -23,35 +23,32 @@
  */
 package hudson.slaves;
 
+import hudson.DescriptorExtensionList;
 import hudson.Extension;
+import hudson.Util;
 import hudson.model.ComputerSet;
 import hudson.model.Descriptor;
-import hudson.model.Slave;
+import hudson.model.Failure;
 import hudson.model.Node;
-import jenkins.model.Jenkins;
+import hudson.model.Slave;
 import hudson.util.DescriptorList;
 import hudson.util.FormValidation;
-import hudson.DescriptorExtensionList;
-import hudson.Util;
-import hudson.model.Failure;
-
 import java.io.IOException;
-import java.util.List;
 import java.util.ArrayList;
-
+import java.util.List;
+import javax.servlet.ServletException;
+import jenkins.model.Jenkins;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
-
-import javax.servlet.ServletException;
 
 /**
  * {@link Descriptor} for {@link Slave}.
  *
  * <h2>Views</h2>
  * <p>
- * This object needs to have <tt>newInstanceDetail.jelly</tt> view, which shows up in
- * <tt>http://server/hudson/computers/new</tt> page as an explanation of this job type.
+ * This object needs to have {@code newInstanceDetail.jelly} view, which shows up in
+ * {@code http://server/hudson/computers/new} page as an explanation of this job type.
  *
  * <h2>Other Implementation Notes</h2>
  *
@@ -99,7 +96,7 @@ public abstract class NodeDescriptor extends Descriptor<Node> {
     public FormValidation doCheckName(@QueryParameter String value ) {
         String name = Util.fixEmptyAndTrim(value);
         if(name==null)
-            return FormValidation.error(Messages.NodeDescripter_CheckName_Mandatory());
+            return FormValidation.error(Messages.NodeDescriptor_CheckName_Mandatory());
         try {
             Jenkins.checkGoodName(name);
         } catch (Failure f) {
@@ -112,7 +109,7 @@ public abstract class NodeDescriptor extends Descriptor<Node> {
      * Returns all the registered {@link NodeDescriptor} descriptors.
      */
     public static DescriptorExtensionList<Node,NodeDescriptor> all() {
-        return Jenkins.getInstance().<Node,NodeDescriptor>getDescriptorList(Node.class);
+        return Jenkins.get().getDescriptorList(Node.class);
     }
 
     /**
@@ -120,10 +117,11 @@ public abstract class NodeDescriptor extends Descriptor<Node> {
      * @deprecated as of 1.286
      *      Use {@link #all()} for read access, and {@link Extension} for registration.
      */
-    public static final DescriptorList<Node> ALL = new DescriptorList<Node>(Node.class);
+    @Deprecated
+    public static final DescriptorList<Node> ALL = new DescriptorList<>(Node.class);
 
     public static List<NodeDescriptor> allInstantiable() {
-        List<NodeDescriptor> r = new ArrayList<NodeDescriptor>();
+        List<NodeDescriptor> r = new ArrayList<>();
         for (NodeDescriptor d : all())
             if(d.isInstantiable())
                 r.add(d);

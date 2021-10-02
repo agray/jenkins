@@ -23,16 +23,19 @@
  */
 package hudson.security;
 
-import com.google.common.collect.ImmutableSet;
 import hudson.model.Build;
 import hudson.model.Computer;
 import hudson.model.Item;
 import hudson.model.ItemGroup;
 import hudson.model.Job;
+import hudson.model.ModelObject;
+import hudson.model.Node;
 import hudson.model.Run;
-import jenkins.model.Jenkins;
-
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Set;
+import jenkins.model.Jenkins;
 
 /**
  * Represents the model class {@link Permission} acts on and scoped to.
@@ -56,7 +59,7 @@ public final class PermissionScope {
     /**
      * Domain model type that approximates this scope.
      */
-    public final Class modelClass;
+    public final Class<? extends ModelObject> modelClass;
 
     /**
      * Other bigger scopes that this scope divides. For example, permissions scoped to {@link ItemGroup}
@@ -65,9 +68,9 @@ public final class PermissionScope {
      */
     private final Set<PermissionScope> containers;
 
-    public PermissionScope(Class modelClass, PermissionScope... containers) {
+    public PermissionScope(Class<? extends ModelObject> modelClass, PermissionScope... containers) {
         this.modelClass = modelClass;
-        this.containers = ImmutableSet.copyOf(containers);
+        this.containers = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(containers)));
     }
 
     /**
@@ -110,7 +113,7 @@ public final class PermissionScope {
     public static final PermissionScope RUN = new PermissionScope(Run.class,ITEM);
 
     /**
-     * Permissions scoped to current instances of {@link Computer}s.
+     * Permissions scoped to {@link Node}s or {@link Computer}s (generally interchangeably).
      */
     public static final PermissionScope COMPUTER = new PermissionScope(Computer.class,JENKINS);
 }

@@ -24,7 +24,9 @@
 package hudson.model;
 
 import hudson.Extension;
+import java.util.Objects;
 import net.sf.json.JSONObject;
+import org.jenkinsci.Symbol;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.StaplerRequest;
 
@@ -32,17 +34,32 @@ import org.kohsuke.stapler.StaplerRequest;
  * {@link StringParameterDefinition} that uses textarea, instead of text box.
  */
 public class TextParameterDefinition extends StringParameterDefinition {
+
+    /**
+     * @since 2.281
+     */
     @DataBoundConstructor
-    public TextParameterDefinition(String name, String defaultValue, String description) {
-        super(name, defaultValue, description);
+    public TextParameterDefinition(String name) {
+        super(name);
     }
 
-    @Extension
+    public TextParameterDefinition(String name, String defaultValue, String description) {
+        this(name);
+        setDefaultValue(defaultValue);
+        setDescription(description);
+    }
+
+    @Extension @Symbol({"text","textParam"})
     public static class DescriptorImpl extends ParameterDescriptor {
         @Override
         public String getDisplayName() {
             return Messages.TextParameterDefinition_DisplayName();
         }
+    }
+
+    @Override
+    public StringParameterValue getDefaultParameterValue() {
+        return new TextParameterValue(getName(), getDefaultValue(), getDescription());
     }
 
     @Override
@@ -55,5 +72,33 @@ public class TextParameterDefinition extends StringParameterDefinition {
     @Override
     public ParameterValue createValue(String value) {
         return new TextParameterValue(getName(), value, getDescription());
+    }
+
+    @Override
+    public int hashCode() {
+        if (TextParameterDefinition.class != getClass()) {
+            return super.hashCode();
+        }
+        return Objects.hash(getName(), getDescription(), getDefaultValue(), isTrim());
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (TextParameterDefinition.class != getClass())
+            return super.equals(obj);
+        if (this == obj)
+            return true;
+        if (obj == null)
+            return false;
+        if (getClass() != obj.getClass())
+            return false;
+        TextParameterDefinition other = (TextParameterDefinition) obj;
+        if (!Objects.equals(getName(), other.getName()))
+            return false;
+        if (!Objects.equals(getDescription(), other.getDescription()))
+            return false;
+        if (!Objects.equals(getDefaultValue(), other.getDefaultValue()))
+            return false;
+        return isTrim() == other.isTrim();
     }
 }

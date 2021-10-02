@@ -24,16 +24,16 @@
 package hudson.util;
 
 import static hudson.Util.fixEmpty;
-import hudson.EnvVars;
+import static hudson.util.FormValidation.APPLY_CONTENT_SECURITY_POLICY_HEADERS;
+
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import hudson.FilePath;
 import hudson.ProxyConfiguration;
 import hudson.Util;
 import hudson.model.AbstractProject;
-import jenkins.model.Jenkins;
 import hudson.model.Item;
-import hudson.security.Permission;
 import hudson.security.AccessControlled;
-
+import hudson.security.Permission;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -42,13 +42,12 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLConnection;
 import java.util.Locale;
-
 import javax.servlet.ServletException;
-
+import jenkins.model.Jenkins;
+import org.kohsuke.stapler.Stapler;
 import org.kohsuke.stapler.StaplerRequest;
 import org.kohsuke.stapler.StaplerResponse;
-import org.acegisecurity.AccessDeniedException;
-import org.kohsuke.stapler.Stapler;
+import org.springframework.security.access.AccessDeniedException;
 
 /**
  * Base class that provides the framework for doing on-the-fly form field validation.
@@ -61,6 +60,7 @@ import org.kohsuke.stapler.Stapler;
  * @deprecated as of 1.294
  *      Use {@link FormValidation} as a return value in your check method.
  */
+@Deprecated
 public abstract class FormFieldValidator {
     public static final Permission CHECK = Jenkins.ADMINISTER;
 
@@ -84,7 +84,7 @@ public abstract class FormFieldValidator {
      *      information or run a process that may have side-effect.
      */
     protected FormFieldValidator(StaplerRequest request, StaplerResponse response, boolean adminOnly) {
-        this(request, response, adminOnly? Jenkins.getInstance():null, adminOnly?CHECK:null);
+        this(request, response, adminOnly? Jenkins.get():null, adminOnly?CHECK:null);
     }
 
     /**
@@ -92,8 +92,9 @@ public abstract class FormFieldValidator {
      *      Use {@link #FormFieldValidator(Permission)} and remove {@link StaplerRequest} and {@link StaplerResponse}
      *      from your "doCheck..." method parameter
      */
+    @Deprecated
     protected FormFieldValidator(StaplerRequest request, StaplerResponse response, Permission permission) {
-        this(request,response, Jenkins.getInstance(),permission);
+        this(request,response, Jenkins.get(),permission);
     }
 
     /**
@@ -109,6 +110,7 @@ public abstract class FormFieldValidator {
      *      Use {@link #FormFieldValidator(AccessControlled,Permission)} and remove {@link StaplerRequest} and {@link StaplerResponse}
      *      from your "doCheck..." method parameter
      */
+    @Deprecated
     protected FormFieldValidator(StaplerRequest request, StaplerResponse response, AccessControlled subject, Permission permission) {
         this.request = request;
         this.response = response;
@@ -130,9 +132,9 @@ public abstract class FormFieldValidator {
                     throw new AccessDeniedException("No subject");
                 subject.checkPermission(permission);
             } catch (AccessDeniedException e) {
-                // if the user has hudson-wisde admin permission, all checks are allowed
+                // if the user has hudson-wide admin permission, all checks are allowed
                 // this is to protect Hudson administrator from broken ACL/SecurityRealm implementation/configuration.
-                if(!Jenkins.getInstance().hasPermission(Jenkins.ADMINISTER))
+                if(!Jenkins.get().hasPermission(Jenkins.ADMINISTER))
                     throw e;
             }
 
@@ -144,6 +146,7 @@ public abstract class FormFieldValidator {
     /**
      * Gets the parameter as a file.
      */
+    @SuppressFBWarnings(value = "PATH_TRAVERSAL_IN", justification = "Not used.")
     protected final File getFileParameter(String paramName) {
         return new File(Util.fixNull(request.getParameter(paramName)));
     }
@@ -167,8 +170,8 @@ public abstract class FormFieldValidator {
      * Sends out a string error message that indicates an error.
      *
      * @param message
-     *      Human readable message to be sent. <tt>error(null)</tt>
-     *      can be used as <tt>ok()</tt>.
+     *      Human readable message to be sent. {@code error(null)}
+     *      can be used as {@code ok()}.
      */
     public void error(String message) throws IOException, ServletException {
         errorWithMarkup(message==null?null:Util.escape(message));
@@ -206,8 +209,8 @@ public abstract class FormFieldValidator {
      * attack.
      *
      * @param message
-     *      Human readable message to be sent. <tt>error(null)</tt>
-     *      can be used as <tt>ok()</tt>.
+     *      Human readable message to be sent. {@code error(null)}
+     *      can be used as {@code ok()}.
      */
     public void errorWithMarkup(String message) throws IOException, ServletException {
         _errorWithMarkup(message,"error");
@@ -227,6 +230,11 @@ public abstract class FormFieldValidator {
         } else {
             response.setContentType("text/html;charset=UTF-8");
             // 1x16 spacer needed for IE since it doesn't support min-height
+            if (APPLY_CONTENT_SECURITY_POLICY_HEADERS) {
+                for (String header : new String[]{"Content-Security-Policy", "X-WebKit-CSP", "X-Content-Security-Policy"}) {
+                    response.setHeader(header, "sandbox; default-src 'none';");
+                }
+            }
             response.getWriter().print("<div class="+ cssClass +"><img src='"+
                     request.getContextPath()+ Jenkins.RESOURCE_PATH+"/images/none.gif' height=16 width=1>"+
                     message+"</div>");
@@ -239,7 +247,8 @@ public abstract class FormFieldValidator {
      * @deprecated as of 1.294
      *      Use {@link FormValidation.URLCheck}
      */
-    public static abstract class URLCheck extends FormFieldValidator {
+    @Deprecated
+    public abstract static class URLCheck extends FormFieldValidator {
 
         public URLCheck(StaplerRequest request, StaplerResponse response) {
             // can be used to check the existence of any file in file system
@@ -269,7 +278,7 @@ public abstract class FormFieldValidator {
         protected boolean findText(BufferedReader in, String literal) throws IOException {
             String line;
             while((line=in.readLine())!=null)
-                if(line.indexOf(literal)!=-1)
+                if(line.contains(literal))
                     return true;
             return false;
         }
@@ -316,6 +325,7 @@ public abstract class FormFieldValidator {
             super(request, response);
         }
 
+        @Override
         protected void check() throws IOException, ServletException {
             String value = fixEmpty(request.getParameter("value"));
             if(value==null) {// nothing entered yet
@@ -327,7 +337,7 @@ public abstract class FormFieldValidator {
 
             try {
                 URL url = new URL(value);
-                HttpURLConnection con = (HttpURLConnection)url.openConnection();
+                HttpURLConnection con = openConnection(url);
                 con.connect();
                 if(con.getResponseCode()!=200
                 || con.getHeaderField("X-Hudson")==null) {
@@ -340,14 +350,20 @@ public abstract class FormFieldValidator {
                 handleIOException(value,e);
             }
         }
+
+        @SuppressFBWarnings(value = "URLCONNECTION_SSRF_FD", justification = "Not used.")
+        private HttpURLConnection openConnection(URL url) throws IOException {
+            return (HttpURLConnection)url.openConnection();
+        }
     }
 
     /**
      * Checks the file mask (specified in the 'value' query parameter) against
      * the current workspace.
      * @since 1.90.
-     * @deprecated as of 1.294. Use {@link FilePath#validateFileMask(String, boolean)} 
+     * @deprecated as of 1.294. Use {@link FilePath#validateFileMask(String, boolean, boolean)} 
      */
+    @Deprecated
     public static class WorkspaceFileMask extends FormFieldValidator {
         private final boolean errorIfNotExist;
 
@@ -361,6 +377,7 @@ public abstract class FormFieldValidator {
             this.errorIfNotExist = errorIfNotExist;
         }
 
+        @Override
         protected void check() throws IOException, ServletException {
             String value = fixEmpty(request.getParameter("value"));
             AbstractProject<?,?> p = (AbstractProject<?,?>)subject;
@@ -378,7 +395,7 @@ public abstract class FormFieldValidator {
                     return;
                 }
 
-                String msg = ws.validateAntFileMask(value, 10000);
+                String msg = ws.validateAntFileMask(value, FilePath.VALIDATE_ANT_FILE_MASK_BOUND);
                 if(errorIfNotExist)     error(msg);
                 else                    warning(msg);
             } catch (InterruptedException e) {
@@ -401,6 +418,7 @@ public abstract class FormFieldValidator {
      * @deprecated as of 1.294. Use {@link FilePath#validateRelativeDirectory(String, boolean)}
      *      (see javadoc plugin for the example)
      */
+    @Deprecated
     public static class WorkspaceDirectory extends WorkspaceFilePath {
         public WorkspaceDirectory(StaplerRequest request, StaplerResponse response, boolean errorIfNotExist) {
             super(request, response, errorIfNotExist, false);
@@ -417,6 +435,7 @@ public abstract class FormFieldValidator {
      * @since 1.160
      * @deprecated as of 1.294. Use {@link FilePath#validateRelativePath(String, boolean, boolean)}
      */
+    @Deprecated
     public static class WorkspaceFilePath extends FormFieldValidator {
         private final boolean errorIfNotExist;
         private final boolean expectingFile;
@@ -428,6 +447,7 @@ public abstract class FormFieldValidator {
             this.expectingFile = expectingFile;
         }
 
+        @Override
         protected void check() throws IOException, ServletException {
             String value = fixEmpty(request.getParameter("value"));
             AbstractProject<?,?> p = (AbstractProject<?,?>)subject;
@@ -474,7 +494,7 @@ public abstract class FormFieldValidator {
                     else                    warning(msg);
                 }
             } catch (InterruptedException e) {
-                ok(); // coundn't check
+                ok(); // couldn't check
             }
         }
 
@@ -500,6 +520,7 @@ public abstract class FormFieldValidator {
      * @since 1.124
      * @deprecated as of 1.294. Use {@link FormValidation#validateExecutable(String)}
      */
+    @Deprecated
     public static class Executable extends FormFieldValidator {
 
         public Executable(StaplerRequest request, StaplerResponse response) {
@@ -507,67 +528,54 @@ public abstract class FormFieldValidator {
             super(request, response, true);
         }
 
+        @Override
         protected void check() throws IOException, ServletException {
             String exe = fixEmpty(request.getParameter("value"));
-            if(exe==null) {
-                ok(); // nothing entered yet
-                return;
-            }
-
-            if(exe.indexOf(File.separatorChar)>=0) {
-                // this is full path
-                File f = new File(exe);
-                if(f.exists()) {
-                    checkExecutable(f);
-                    return;
-                }
-
-                File fexe = new File(exe+".exe");
-                if(fexe.exists()) {
-                    checkExecutable(fexe);
-                    return;
-                }
-
-                error("There's no such file: "+exe);
-            } else {
-                // look in PATH
-                String path = EnvVars.masterEnvVars.get("PATH");
-                String tokenizedPath = "";
-                String delimiter = null;
-                if(path!=null) {
-                    for (String _dir : Util.tokenize(path.replace("\\", "\\\\"),File.pathSeparator)) {
-                        if (delimiter == null) {
-                          delimiter = ", ";
-                        }
-                        else {
-                          tokenizedPath += delimiter;
-                        }
-
-                        tokenizedPath += _dir.replace('\\', '/');
-                        
-                        File dir = new File(_dir);
-
-                        File f = new File(dir,exe);
-                        if(f.exists()) {
-                            checkExecutable(f);
-                            return;
-                        }
-
-                        File fexe = new File(dir,exe+".exe");
-                        if(fexe.exists()) {
-                            checkExecutable(fexe);
-                            return;
-                        }
+            FormFieldValidator.Executable self = this;
+            Exception[] exceptions = {null};
+            DOSToUnixPathHelper.iteratePath(exe, new DOSToUnixPathHelper.Helper() {
+                @Override
+                public void ok() {
+                    try {
+                        self.ok();
+                    } catch (Exception e) {
+                        exceptions[0] = e;
                     }
-                    
-                    tokenizedPath += ".";
-                }
-                else {
-                  tokenizedPath = "unavailable.";
                 }
 
-                // didn't find it
-                error("There's no such executable "+exe+" in PATH: "+tokenizedPath);
+                @Override
+                public void checkExecutable(File fexe) {
+                    try {
+                        self.checkExecutable(fexe);
+                    } catch (Exception e) {
+                        exceptions[0] = e;
+                    }
+                }
+
+                @Override
+                public void error(String string) {
+                    try {
+                        self.error(string);
+                    } catch (Exception e) {
+                        exceptions[0] = e;
+                    }
+                }
+
+                @Override
+                public void validate(File fexe) {
+                    try {
+                        self.checkExecutable(fexe);
+                    } catch (IOException | ServletException ex) {
+                        exceptions[0] = ex;
+                    }
+                }
+            });
+            Exception e = exceptions[0];
+            if (e != null) {
+                if (e instanceof IOException)
+                    throw (IOException)e;
+                if (e instanceof ServletException)
+                    throw (ServletException)e;
             }
         }
 
@@ -586,6 +594,7 @@ public abstract class FormFieldValidator {
      * @deprecated as of 1.305
      *      Use {@link FormValidation#validateBase64(String, boolean, boolean, String)} instead.
      */
+    @Deprecated
     public static class Base64 extends FormFieldValidator {
         private final boolean allowWhitespace;
         private final boolean allowEmpty;
@@ -598,6 +607,7 @@ public abstract class FormFieldValidator {
             this.errorMessage = errorMessage;
         }
 
+        @Override
         protected void check() throws IOException, ServletException {
             try {
                 String v = request.getParameter("value");
@@ -613,9 +623,9 @@ public abstract class FormFieldValidator {
                     return;
                 }
                 
-                com.trilead.ssh2.crypto.Base64.decode(v.toCharArray());
+                java.util.Base64.getDecoder().decode(v);
                 ok();
-            } catch (IOException e) {
+            } catch (IOException | IllegalArgumentException e) {
                 fail();
             }
         }
@@ -626,17 +636,19 @@ public abstract class FormFieldValidator {
     }
 
     /**
-     * Verifies that the 'value' parameter is an integer >= 0.
+     * Verifies that the {@code value} parameter is an integer ≥ 0.
      *
      * @since 1.282
      * @deprecated as of 1.294
      *      Use {@link FormValidation#validateNonNegativeInteger(String)}
      */
+    @Deprecated
     public static class NonNegativeInteger extends FormFieldValidator {
         public NonNegativeInteger() {
             super(null);
         }
 
+        @Override
         protected void check() throws IOException, ServletException {
             try {
                 String value = request.getParameter("value");

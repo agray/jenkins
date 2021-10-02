@@ -26,13 +26,14 @@ package hudson.lifecycle;
 import hudson.ExtensionPoint;
 import hudson.Functions;
 import hudson.Util;
-import jenkins.model.Jenkins;
-
 import java.io.File;
 import java.io.IOException;
-import java.util.logging.Logger;
+import java.io.UncheckedIOException;
+import java.lang.reflect.InvocationTargetException;
 import java.util.logging.Level;
-
+import java.util.logging.Logger;
+import jenkins.model.Jenkins;
+import jenkins.util.SystemProperties;
 import org.apache.commons.io.FileUtils;
 
 /**
@@ -54,14 +55,18 @@ public abstract class Lifecycle implements ExtensionPoint {
      *
      * @return never null
      */
-    public synchronized static Lifecycle get() {
+    public static synchronized Lifecycle get() {
         if(INSTANCE==null) {
             Lifecycle instance;
-            String p = System.getProperty("hudson.lifecycle");
+            String p = SystemProperties.getString("hudson.lifecycle");
             if(p!=null) {
                 try {
-                    ClassLoader cl = Jenkins.getInstance().getPluginManager().uberClassLoader;
-                    instance = (Lifecycle)cl.loadClass(p).newInstance();
+                    ClassLoader cl = Jenkins.get().getPluginManager().uberClassLoader;
+                    instance = (Lifecycle)cl.loadClass(p).getDeclaredConstructor().newInstance();
+                } catch (NoSuchMethodException e) {
+                    NoSuchMethodError x = new NoSuchMethodError(e.getMessage());
+                    x.initCause(e);
+                    throw x;
                 } catch (InstantiationException e) {
                     InstantiationError x = new InstantiationError(e.getMessage());
                     x.initCause(e);
@@ -74,6 +79,19 @@ public abstract class Lifecycle implements ExtensionPoint {
                     NoClassDefFoundError x = new NoClassDefFoundError(e.getMessage());
                     x.initCause(e);
                     throw x;
+                } catch (InvocationTargetException e) {
+                    Throwable t = e.getCause();
+                    if (t instanceof RuntimeException) {
+                        throw (RuntimeException) t;
+                    } else if (t instanceof IOException) {
+                        throw new UncheckedIOException((IOException) t);
+                    } else if (t instanceof Exception) {
+                        throw new RuntimeException(t);
+                    } else if (t instanceof Error) {
+                        throw (Error) t;
+                    } else {
+                        throw new Error(e);
+                    }
                 }
             } else {
                 if(Functions.isWindows()) {
@@ -111,7 +129,7 @@ public abstract class Lifecycle implements ExtensionPoint {
     }
 
     /**
-     * If the location of <tt>jenkins.war</tt> is known in this life cycle,
+     * If the location of {@code jenkins.war} is known in this life cycle,
      * return it location. Otherwise return null to indicate that it is unknown.
      *
      * <p>
@@ -119,7 +137,7 @@ public abstract class Lifecycle implements ExtensionPoint {
      * to a newer version.
      */
     public File getHudsonWar() {
-        String war = System.getProperty("executable-war");
+        String war = SystemProperties.getString("executable-war");
         if(war!=null && new File(war).exists())
             return new File(war);
         return null;
@@ -130,7 +148,7 @@ public abstract class Lifecycle implements ExtensionPoint {
      *
      * <p>
      * On some system, most notably Windows, a file being in use cannot be changed,
-     * so rewriting <tt>jenkins.war</tt> requires some special trick. Override this method
+     * so rewriting {@code jenkins.war} requires some special trick. Override this method
      * to do so.
      */
     public void rewriteHudsonWar(File by) throws IOException {
@@ -158,7 +176,14 @@ public abstract class Lifecycle implements ExtensionPoint {
     public boolean canRewriteHudsonWar() {
         // if we don't know where jenkins.war is, it's impossible to replace.
         File f = getHudsonWar();
-        return f!=null && f.canWrite();
+        if (f == null || !f.canWrite()) {
+            return false;
+        }
+        File parent = f.getParentFile();
+        if (parent == null || !parent.canWrite()) {
+            return false;
+        }
+        return true;
     }
 
     /**

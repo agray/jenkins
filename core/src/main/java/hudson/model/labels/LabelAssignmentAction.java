@@ -1,5 +1,6 @@
 package hudson.model.labels;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
 import hudson.model.Action;
 import hudson.model.Label;
 import hudson.model.LoadBalancer;
@@ -32,8 +33,8 @@ public interface LabelAssignmentAction extends Action {
      * @param task
      *      Never null.
      * @return
-     *      null to let other {@link LabelAssignmentAction}s take control, eventually to {@code SubTask#getAssignedLabel()}.
+     *      null to let other {@link LabelAssignmentAction}s take control, eventually to {@link SubTask#getAssignedLabel()}.
      *      If non-null value is returned, that label will be authoritative.
      */
-    Label getAssignedLabel(SubTask task);
+    Label getAssignedLabel(@NonNull SubTask task);
 }

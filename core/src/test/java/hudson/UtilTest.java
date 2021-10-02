@@ -1,19 +1,19 @@
 /*
  * The MIT License
- * 
+ *
  * Copyright (c) 2004-2010, Sun Microsystems, Inc., Kohsuke Kawaguchi,
  * Daniel Dyer, Erik Ramfelt, Richard Bair, id:cactusman
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -24,31 +24,53 @@
  */
 package hudson;
 
-import java.util.Map;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Properties;
+import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.CoreMatchers.startsWith;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
+import hudson.model.TaskListener;
+import hudson.os.WindowsUtil;
+import hudson.util.StreamTaskListener;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-
-import static org.junit.Assert.*;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Properties;
+import org.apache.commons.io.FileUtils;
+import org.hamcrest.BaseMatcher;
+import org.hamcrest.Description;
+import org.junit.Assert;
 import org.junit.Assume;
+import org.junit.Rule;
 import org.junit.Test;
-import org.jvnet.hudson.test.Bug;
-
-import hudson.util.StreamTaskListener;
-import java.io.FileOutputStream;
-import java.io.OutputStream;
-import org.junit.internal.AssumptionViolatedException;
+import org.junit.rules.TemporaryFolder;
+import org.jvnet.hudson.test.Issue;
 
 /**
  * @author Kohsuke Kawaguchi
  */
 public class UtilTest {
+
+    @Rule public TemporaryFolder tmp = new TemporaryFolder();
+
     @Test
     public void testReplaceMacro() {
-        Map<String,String> m = new HashMap<String,String>();
+        Map<String,String> m = new HashMap<>();
         m.put("A","a");
         m.put("A.B","a-b");
         m.put("AA","aa");
@@ -69,7 +91,7 @@ public class UtilTest {
         assertEquals("asd$${AA}dd", Util.replaceMacro("asd$$$${AA}dd",m));
         assertEquals("$", Util.replaceMacro("$$",m));
         assertEquals("$$", Util.replaceMacro("$$$$",m));
-        
+
         // dots
         assertEquals("a.B", Util.replaceMacro("$A.B", m));
         assertEquals("a-b", Util.replaceMacro("${A.B}", m));
@@ -110,7 +132,7 @@ public class UtilTest {
         assertEquals(Messages.Util_millisecond(17), Util.getTimeSpanString(17L));
         // 1ms
         assertEquals(Messages.Util_millisecond(1), Util.getTimeSpanString(1L));
-        // Test HUDSON-2843 (locale with comma as fraction separator got exception for <10 sec)
+        // Test JENKINS-2843 (locale with comma as fraction separator got exception for <10 sec)
         Locale saveLocale = Locale.getDefault();
         Locale.setDefault(Locale.GERMANY);
         try {
@@ -129,9 +151,9 @@ public class UtilTest {
     public void testEncodeSpaces() {
         final String urlWithSpaces = "http://hudson/job/Hudson Job";
         String encoded = Util.encode(urlWithSpaces);
-        assertEquals(encoded, "http://hudson/job/Hudson%20Job");
+        assertEquals("http://hudson/job/Hudson%20Job", encoded);
     }
-        
+
     /**
      * Test the rawEncode() method.
      */
@@ -144,9 +166,31 @@ public class UtilTest {
             " \"#%/:;<>?", "%20%22%23%25%2F%3A%3B%3C%3E%3F",
             "[\\]^`{|}~", "%5B%5C%5D%5E%60%7B%7C%7D%7E",
             "d\u00E9velopp\u00E9s", "d%C3%A9velopp%C3%A9s",
+            "Foo \uD800\uDF98 Foo", "Foo%20%F0%90%8E%98%20Foo",
+            "\u00E9 ", "%C3%A9%20"
         };
         for (int i = 0; i < data.length; i += 2) {
             assertEquals("test " + i, data[i + 1], Util.rawEncode(data[i]));
+        }
+    }
+
+    /**
+     * Test the fullEncode() method.
+     */
+    @Test
+    public void testFullEncode(){
+        String[] data = {
+                "abcdefghijklmnopqrstuvwxyz", "abcdefghijklmnopqrstuvwxyz",
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                "01234567890!@$&*()-_=+',.", "01234567890%21%40%24%26%2A%28%29%2D%5F%3D%2B%27%2C%2E",
+                " \"#%/:;<>?", "%20%22%23%25%2F%3A%3B%3C%3E%3F",
+                "[\\]^`{|}~", "%5B%5C%5D%5E%60%7B%7C%7D%7E",
+                "d\u00E9velopp\u00E9s", "d%C3%A9velopp%C3%A9s",
+                "Foo \uD800\uDF98 Foo", "Foo%20%F0%90%8E%98%20Foo",
+                "\u00E9 ", "%C3%A9%20"
+        };
+        for (int i = 0; i < data.length; i += 2) {
+            assertEquals("test " + i, data[i + 1], Util.fullEncode(data[i]));
         }
     }
 
@@ -163,11 +207,11 @@ public class UtilTest {
 
     @Test
     public void testSymlink() throws Exception {
-        Assume.assumeTrue(!Functions.isWindows());
+        Assume.assumeFalse(Functions.isWindows());
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         StreamTaskListener l = new StreamTaskListener(baos);
-        File d = Util.createTempDir();
+        File d = tmp.getRoot();
         try {
             new FilePath(new File(d, "a")).touch(0);
             assertNull(Util.resolveSymlink(new File(d, "a")));
@@ -185,16 +229,16 @@ public class UtilTest {
                 System.err.println("log output: " + log);
 
             assertEquals(buf.toString(),Util.resolveSymlink(new File(d,"x")));
-            
-            
+
+
             // test linking from another directory
             File anotherDir = new File(d,"anotherDir");
             assertTrue("Couldn't create "+anotherDir,anotherDir.mkdir());
-            
+
             Util.createSymlink(d,"a","anotherDir/link",l);
             assertEquals("a",Util.resolveSymlink(new File(d,"anotherDir/link")));
-            
-            // JENKINS-12331: either a bug in createSymlink or this isn't supposed to work: 
+
+            // JENKINS-12331: either a bug in createSymlink or this isn't supposed to work:
             //assertTrue(Util.isSymlink(new File(d,"anotherDir/link")));
 
             File external = File.createTempFile("something", "");
@@ -208,29 +252,29 @@ public class UtilTest {
             Util.deleteRecursive(d);
         }
     }
-    
+
     @Test
     public void testIsSymlink() throws IOException, InterruptedException {
-        Assume.assumeTrue(!Functions.isWindows());
-        
+        Assume.assumeFalse(Functions.isWindows());
+
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         StreamTaskListener l = new StreamTaskListener(baos);
-        File d = Util.createTempDir();
+        File d = tmp.getRoot();
         try {
             new FilePath(new File(d, "original")).touch(0);
             assertFalse(Util.isSymlink(new File(d, "original")));
             Util.createSymlink(d,"original","link", l);
-            
+
             assertTrue(Util.isSymlink(new File(d, "link")));
-            
+
             // test linking to another directory
             File dir = new File(d,"dir");
             assertTrue("Couldn't create "+dir,dir.mkdir());
             assertFalse(Util.isSymlink(new File(d,"dir")));
-            
+
             File anotherDir = new File(d,"anotherDir");
             assertTrue("Couldn't create "+anotherDir,anotherDir.mkdir());
-            
+
             Util.createSymlink(d,"dir","anotherDir/symlinkDir",l);
             // JENKINS-12331: either a bug in createSymlink or this isn't supposed to work:
             // assertTrue(Util.isSymlink(new File(d,"anotherDir/symlinkDir")));
@@ -239,61 +283,71 @@ public class UtilTest {
         }
     }
 
-    @Test public void deleteFile() throws Exception {
-        Assume.assumeTrue(Functions.isWindows());
-        Class<?> c;
-        try {
-            c = Class.forName("java.nio.file.FileSystemException");
-        } catch (ClassNotFoundException x) {
-            throw new AssumptionViolatedException("prior to JDK 7", x);
-        }
-        File d = Util.createTempDir();
-        try {
-            File f = new File(d, "f");
-            OutputStream os = new FileOutputStream(f);
-            try {
-                Util.deleteFile(f);
-                fail("should not have been deletable");
-            } catch (IOException x) {
-                assertEquals(c, x.getClass());
-            } finally {
-                os.close();
-            }
-        } finally {
-            Util.deleteRecursive(d);
-        }
+    @Test
+    public void testIsSymlink_onWindows_junction() throws Exception {
+        Assume.assumeTrue("Uses Windows-specific features", Functions.isWindows());
+        File targetDir = tmp.newFolder("targetDir");
+        File d = tmp.newFolder("dir");
+        File junction = WindowsUtil.createJunction(new File(d, "junction"), targetDir);
+        assertTrue(Util.isSymlink(junction));
+    }
+
+    @Test
+    @Issue("JENKINS-55448")
+    public void testIsSymlink_ParentIsJunction() throws IOException, InterruptedException {
+        Assume.assumeTrue("Uses Windows-specific features", Functions.isWindows());
+        File targetDir = tmp.newFolder();
+        File file = new File(targetDir, "test-file");
+        new FilePath(file).touch(System.currentTimeMillis());
+        File dir = tmp.newFolder();
+        File junction = WindowsUtil.createJunction(new File(dir, "junction"), targetDir);
+
+        assertTrue(Util.isSymlink(junction));
+        assertFalse(Util.isSymlink(file));
+    }
+
+    @Test
+    @Issue("JENKINS-55448")
+    public void testIsSymlink_ParentIsSymlink() throws IOException, InterruptedException {
+        File folder = tmp.newFolder();
+        File file = new File(folder, "test-file");
+        new FilePath(file).touch(System.currentTimeMillis());
+        Path link = tmp.getRoot().toPath().resolve("sym-link");
+        Path pathWithSymlinkParent = Files.createSymbolicLink(link, folder.toPath()).resolve("test-file");
+        assertTrue(Util.isSymlink(link));
+        assertFalse(Util.isSymlink(pathWithSymlinkParent));
     }
 
     @Test
     public void testHtmlEscape() {
         assertEquals("<br>", Util.escape("\n"));
-        assertEquals("&lt;a>", Util.escape("<a>"));
+        assertEquals("&lt;a&gt;", Util.escape("<a>"));
         assertEquals("&#039;&quot;", Util.escape("'\""));
         assertEquals("&nbsp; ", Util.escape("  "));
     }
-    
+
     /**
      * Compute 'known-correct' digests and see if I still get them when computed concurrently
      * to another digest.
      */
-    @Bug(10346)
+    @Issue("JENKINS-10346")
     @Test
     public void testDigestThreadSafety() throws InterruptedException {
     	String a = "abcdefgh";
     	String b = "123456789";
-    	
+
     	String digestA = Util.getDigestOf(a);
     	String digestB = Util.getDigestOf(b);
-    	
+
     	DigesterThread t1 = new DigesterThread(a, digestA);
     	DigesterThread t2 = new DigesterThread(b, digestB);
-    	
+
     	t1.start();
     	t2.start();
-    	
+
     	t1.join();
     	t2.join();
-    	
+
     	if (t1.error != null) {
     		fail(t1.error);
     	}
@@ -301,18 +355,19 @@ public class UtilTest {
     		fail(t2.error);
     	}
     }
-    
+
     private static class DigesterThread extends Thread {
     	private String string;
 		private String expectedDigest;
-		
+
 		private String error;
 
-		public DigesterThread(String string, String expectedDigest) {
+		DigesterThread(String string, String expectedDigest) {
     		this.string = string;
     		this.expectedDigest = expectedDigest;
     	}
-		
+
+		@Override
 		public void run() {
 			for (int i=0; i < 1000; i++) {
 				String digest = Util.getDigestOf(this.string);
@@ -325,6 +380,7 @@ public class UtilTest {
     }
 
     @Test
+    @SuppressWarnings("deprecation")
     public void testIsAbsoluteUri() {
         assertTrue(Util.isAbsoluteUri("http://foobar/"));
         assertTrue(Util.isAbsoluteUri("mailto:kk@kohsuke.org"));
@@ -336,6 +392,26 @@ public class UtilTest {
     }
 
     @Test
+    @Issue("SECURITY-276")
+    public void testIsSafeToRedirectTo() {
+        assertFalse(Util.isSafeToRedirectTo("http://foobar/"));
+        assertFalse(Util.isSafeToRedirectTo("mailto:kk@kohsuke.org"));
+        assertFalse(Util.isSafeToRedirectTo("d123://test/"));
+        assertFalse(Util.isSafeToRedirectTo("//google.com"));
+
+        assertTrue(Util.isSafeToRedirectTo("foo/bar/abc:def"));
+        assertTrue(Util.isSafeToRedirectTo("foo?abc:def"));
+        assertTrue(Util.isSafeToRedirectTo("foo#abc:def"));
+        assertTrue(Util.isSafeToRedirectTo("foo/bar"));
+        assertTrue(Util.isSafeToRedirectTo("/"));
+        assertTrue(Util.isSafeToRedirectTo("/foo"));
+        assertTrue(Util.isSafeToRedirectTo(".."));
+        assertTrue(Util.isSafeToRedirectTo("../.."));
+        assertTrue(Util.isSafeToRedirectTo("/#foo"));
+        assertTrue(Util.isSafeToRedirectTo("/?foo"));
+    }
+
+    @Test
     public void loadProperties() throws IOException {
 
         assertEquals(0, Util.loadProperties("").size());
@@ -343,5 +419,223 @@ public class UtilTest {
         Properties p = Util.loadProperties("k.e.y=va.l.ue");
         assertEquals(p.toString(), "va.l.ue", p.get("k.e.y"));
         assertEquals(p.toString(), 1, p.size());
+    }
+
+    @Test
+    public void isRelativePathUnix() {
+        assertThat("/", not(aRelativePath()));
+        assertThat("/foo/bar", not(aRelativePath()));
+        assertThat("/foo/../bar", not(aRelativePath()));
+        assertThat("", aRelativePath());
+        assertThat(".", aRelativePath());
+        assertThat("..", aRelativePath());
+        assertThat("./foo", aRelativePath());
+        assertThat("./foo/bar", aRelativePath());
+        assertThat("./foo/bar/", aRelativePath());
+    }
+
+    @Test
+    public void isRelativePathWindows() {
+        assertThat("\\", aRelativePath());
+        assertThat("\\foo\\bar", aRelativePath());
+        assertThat("\\foo\\..\\bar", aRelativePath());
+        assertThat("", aRelativePath());
+        assertThat(".", aRelativePath());
+        assertThat(".\\foo", aRelativePath());
+        assertThat(".\\foo\\bar", aRelativePath());
+        assertThat(".\\foo\\bar\\", aRelativePath());
+        assertThat("\\\\foo", aRelativePath());
+        assertThat("\\\\foo\\", not(aRelativePath()));
+        assertThat("\\\\foo\\c", not(aRelativePath()));
+        assertThat("C:", aRelativePath());
+        assertThat("z:", aRelativePath());
+        assertThat("0:", aRelativePath());
+        assertThat("c:.", aRelativePath());
+        assertThat("c:\\", not(aRelativePath()));
+        assertThat("c:/", not(aRelativePath()));
+    }
+
+    private static RelativePathMatcher aRelativePath() {
+        return new RelativePathMatcher();
+    }
+
+    private static class RelativePathMatcher extends BaseMatcher<String> {
+
+        @Override
+        public boolean matches(Object item) {
+            return Util.isRelativePath((String) item);
+        }
+
+        @Override
+        public void describeTo(Description description) {
+            description.appendText("a relative path");
+        }
+    }
+
+    @Test
+    public void testIsDescendant() throws IOException {
+        File root;
+        File other;
+        if (Functions.isWindows()) {
+            root = new File("C:\\Temp");
+            other = new File("C:\\Windows");
+        } else {
+            root = new File("/tmp");
+            other = new File("/usr");
+
+        }
+        assertTrue(Util.isDescendant(root, new File(root,"child")));
+        assertTrue(Util.isDescendant(root, new File(new File(root,"child"), "grandchild")));
+        assertFalse(Util.isDescendant(root, other));
+        assertFalse(Util.isDescendant(root, new File(other, "child")));
+
+        assertFalse(Util.isDescendant(new File(root,"child"), root));
+        assertFalse(Util.isDescendant(new File(new File(root,"child"), "grandchild"), root));
+
+        //.. whithin root
+        File convoluted = new File(root, "child");
+        convoluted = new File(convoluted, "..");
+        convoluted = new File(convoluted, "child");
+        assertTrue(Util.isDescendant(root, convoluted));
+
+        //.. going outside of root
+        convoluted = new File(root, "..");
+        convoluted = new File(convoluted, other.getName());
+        convoluted = new File(convoluted, "child");
+        assertFalse(Util.isDescendant(root, convoluted));
+
+        //. on root
+        assertTrue(Util.isDescendant(new File(root, "."), new File(root, "child")));
+        //. on both
+        assertTrue(Util.isDescendant(new File(root, "."), new File(new File(root, "child"), ".")));
+    }
+
+    @Test
+    public void testModeToPermissions() throws Exception {
+        assertEquals(PosixFilePermissions.fromString("rwxrwxrwx"), Util.modeToPermissions(0777));
+        assertEquals(PosixFilePermissions.fromString("rwxr-xrwx"), Util.modeToPermissions(0757));
+        assertEquals(PosixFilePermissions.fromString("rwxr-x---"), Util.modeToPermissions(0750));
+        assertEquals(PosixFilePermissions.fromString("r-xr-x---"), Util.modeToPermissions(0550));
+        assertEquals(PosixFilePermissions.fromString("r-xr-----"), Util.modeToPermissions(0540));
+        assertEquals(PosixFilePermissions.fromString("--xr-----"), Util.modeToPermissions(0140));
+        assertEquals(PosixFilePermissions.fromString("--xr---w-"), Util.modeToPermissions(0142));
+        assertEquals(PosixFilePermissions.fromString("--xr--rw-"), Util.modeToPermissions(0146));
+        assertEquals(PosixFilePermissions.fromString("-wxr--rw-"), Util.modeToPermissions(0346));
+        assertEquals(PosixFilePermissions.fromString("---------"), Util.modeToPermissions(0000));
+
+        assertEquals("Non-permission bits should be ignored", PosixFilePermissions.fromString("r-xr-----"), Util.modeToPermissions(0100540));
+
+        Exception e = Assert.assertThrows(Exception.class, () -> Util.modeToPermissions(01777));
+        assertThat(e.getMessage(), startsWith("Invalid mode"));
+    }
+
+    @Test
+    public void testPermissionsToMode() throws Exception {
+        assertEquals(0777, Util.permissionsToMode(PosixFilePermissions.fromString("rwxrwxrwx")));
+        assertEquals(0757, Util.permissionsToMode(PosixFilePermissions.fromString("rwxr-xrwx")));
+        assertEquals(0750, Util.permissionsToMode(PosixFilePermissions.fromString("rwxr-x---")));
+        assertEquals(0550, Util.permissionsToMode(PosixFilePermissions.fromString("r-xr-x---")));
+        assertEquals(0540, Util.permissionsToMode(PosixFilePermissions.fromString("r-xr-----")));
+        assertEquals(0140, Util.permissionsToMode(PosixFilePermissions.fromString("--xr-----")));
+        assertEquals(0142, Util.permissionsToMode(PosixFilePermissions.fromString("--xr---w-")));
+        assertEquals(0146, Util.permissionsToMode(PosixFilePermissions.fromString("--xr--rw-")));
+        assertEquals(0346, Util.permissionsToMode(PosixFilePermissions.fromString("-wxr--rw-")));
+        assertEquals(0000, Util.permissionsToMode(PosixFilePermissions.fromString("---------")));
+    }
+
+    @Test
+    public void testDifferenceDays() throws Exception {
+        Date may_6_10am = parseDate("2018-05-06 10:00:00");
+        Date may_6_11pm55 = parseDate("2018-05-06 23:55:00");
+        Date may_7_01am = parseDate("2018-05-07 01:00:00");
+        Date may_7_11pm = parseDate("2018-05-07 11:00:00");
+        Date may_8_08am = parseDate("2018-05-08 08:00:00");
+        Date june_3_08am = parseDate("2018-06-03 08:00:00");
+        Date june_9_08am = parseDate("2018-06-09 08:00:00");
+        Date june_9_08am_nextYear = parseDate("2019-06-09 08:00:00");
+
+        assertEquals(0, Util.daysBetween(may_6_10am, may_6_11pm55));
+        assertEquals(1, Util.daysBetween(may_6_10am, may_7_01am));
+        assertEquals(1, Util.daysBetween(may_6_11pm55, may_7_01am));
+        assertEquals(2, Util.daysBetween(may_6_10am, may_8_08am));
+        assertEquals(1, Util.daysBetween(may_7_11pm, may_8_08am));
+
+        // larger scale
+        assertEquals(28, Util.daysBetween(may_6_10am, june_3_08am));
+        assertEquals(34, Util.daysBetween(may_6_10am, june_9_08am));
+        assertEquals(365 + 34, Util.daysBetween(may_6_10am, june_9_08am_nextYear));
+
+        // reverse order
+        assertEquals(-1, Util.daysBetween(may_8_08am, may_7_11pm));
+    }
+
+    private Date parseDate(String dateString) throws ParseException {
+        return new SimpleDateFormat("yyyy-MM-dd hh:mm:ss").parse(dateString);
+    }
+
+    @Test
+    @Issue("SECURITY-904")
+    public void resolveSymlinkToFile() throws Exception {
+        //  root
+        //      /a
+        //          /aa
+        //              aa.txt
+        //          /_b => symlink to /root/b
+        //      /b
+        //          /_a => symlink to /root/a
+        File root = tmp.getRoot();
+        File a = new File(root, "a");
+        File aa = new File(a, "aa");
+        aa.mkdirs();
+        File aaTxt = new File(aa, "aa.txt");
+        FileUtils.write(aaTxt, "aa", StandardCharsets.US_ASCII, false);
+
+        File b = new File(root, "b");
+        b.mkdir();
+
+        File _a = new File(b, "_a");
+        Util.createSymlink(_a.getParentFile(), a.getAbsolutePath(), _a.getName(), TaskListener.NULL);
+
+        File _b = new File(a, "_b");
+        Util.createSymlink(_b.getParentFile(), b.getAbsolutePath(), _b.getName(), TaskListener.NULL);
+
+        assertTrue(Files.isSymbolicLink(_a.toPath()));
+        assertTrue(Files.isSymbolicLink(_b.toPath()));
+
+        // direct symlinks are resolved
+        assertEquals(Util.resolveSymlinkToFile(_a), a);
+        assertEquals(Util.resolveSymlinkToFile(_b), b);
+
+        // intermediate symlinks are NOT resolved
+        assertNull(Util.resolveSymlinkToFile(new File(_a, "aa")));
+        assertNull(Util.resolveSymlinkToFile(new File(_a, "aa/aa.txt")));
+    }
+
+    @Test
+    public void ifOverriddenSuccess() {
+        assertTrue(Util.ifOverridden(() -> true, BaseClass.class, DerivedClassSuccess.class, "method"));
+    }
+
+    @Test
+    public void ifOverriddenFailure() {
+        AbstractMethodError error = Assert.assertThrows(AbstractMethodError.class, () -> Util.ifOverridden(() -> true, BaseClass.class, DerivedClassFailure.class, "method"));
+        assertEquals("The class " + DerivedClassFailure.class.getName() + " must override at least one of the BaseClass.method methods", error.getMessage());
+    }
+
+    public static class BaseClass {
+        protected String method() {
+            return "base";
+        }
+    }
+
+    public static class DerivedClassFailure extends BaseClass {
+
+    }
+
+    public static class DerivedClassSuccess extends BaseClass {
+        @Override
+        protected String method() {
+            return DerivedClassSuccess.class.getName();
+        }
     }
 }

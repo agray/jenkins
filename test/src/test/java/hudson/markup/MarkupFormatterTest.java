@@ -23,26 +23,44 @@
  */
 package hudson.markup;
 
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
+import static org.junit.Assert.assertEquals;
+
+import com.gargoylesoftware.htmlunit.HttpMethod;
+import com.gargoylesoftware.htmlunit.Page;
+import com.gargoylesoftware.htmlunit.WebRequest;
+import com.gargoylesoftware.htmlunit.WebResponse;
+import com.gargoylesoftware.htmlunit.html.HtmlPage;
 import hudson.security.AuthorizationStrategy.Unsecured;
 import hudson.security.HudsonPrivateSecurityRealm;
-import org.jvnet.hudson.test.HudsonTestCase;
-import org.jvnet.hudson.test.TestExtension;
-import org.kohsuke.stapler.DataBoundConstructor;
-
 import java.io.IOException;
 import java.io.Writer;
+import java.net.URL;
+import org.junit.Rule;
+import org.junit.Test;
+import org.jvnet.hudson.test.Issue;
+import org.jvnet.hudson.test.JenkinsRule;
+import org.jvnet.hudson.test.TestExtension;
+import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
  * @author Kohsuke Kawaguchi
  */
-public class MarkupFormatterTest extends HudsonTestCase {
-    public void testConfigRoundtrip() throws Exception {
-        jenkins.setSecurityRealm(new HudsonPrivateSecurityRealm(false));
-        jenkins.setAuthorizationStrategy(new Unsecured());
-        jenkins.setMarkupFormatter(new DummyMarkupImpl("hello"));
-        configRoundtrip();
+public class MarkupFormatterTest {
 
-        assertEquals("hello", ((DummyMarkupImpl) jenkins.getMarkupFormatter()).prefix);
+    @Rule
+    public JenkinsRule j = new JenkinsRule();
+
+    @Test
+    public void configRoundtrip() throws Exception {
+        j.jenkins.setSecurityRealm(new HudsonPrivateSecurityRealm(false));
+        j.jenkins.setAuthorizationStrategy(new Unsecured());
+        j.jenkins.setMarkupFormatter(new DummyMarkupImpl("hello"));
+        j.configRoundtrip();
+
+        assertEquals("hello", ((DummyMarkupImpl) j.jenkins.getMarkupFormatter()).prefix);
     }
 
     public static class DummyMarkupImpl extends MarkupFormatter {
@@ -58,11 +76,38 @@ public class MarkupFormatterTest extends HudsonTestCase {
         }
 
         @TestExtension
-        public static class DescriptorImpl extends MarkupFormatterDescriptor {
-            @Override
-            public String getDisplayName() {
-                return "dummy";
-            }
-        }
+        public static class DescriptorImpl extends MarkupFormatterDescriptor {}
+    }
+
+    @Test
+    public void defaultEscaped() throws Exception {
+        assertEquals("&lt;your thing here&gt;", j.jenkins.getMarkupFormatter().translate("<your thing here>"));
+        assertEquals("", j.jenkins.getMarkupFormatter().translate(""));
+        assertEquals("", j.jenkins.getMarkupFormatter().translate(null));
+    }
+
+    @Test
+    @Issue("SECURITY-2153")
+    public void security2153RequiresPOST() throws Exception {
+        final JenkinsRule.WebClient wc = j.createWebClient();
+        wc.setThrowExceptionOnFailingStatusCode(false);
+        final HtmlPage htmlPage = wc.goTo("markupFormatter/previewDescription?text=lolwut");
+        final WebResponse response = htmlPage.getWebResponse();
+        assertEquals(405, response.getStatusCode());
+        assertThat(response.getContentAsString(), containsString("This endpoint now requires that POST requests are sent"));
+        assertThat(response.getContentAsString(), not(containsString("lolwut")));
+    }
+
+    @Test
+    @Issue("SECURITY-2153")
+    public void security2153SetsCSP() throws Exception {
+        final JenkinsRule.WebClient wc = j.createWebClient();
+        final Page htmlPage = wc.getPage(wc.addCrumb(new WebRequest(new URL(j.jenkins.getRootUrl() + "/markupFormatter/previewDescription?text=lolwut"), HttpMethod.POST)));
+        final WebResponse response = htmlPage.getWebResponse();
+        assertEquals(200, response.getStatusCode());
+        assertThat(response.getContentAsString(), containsString("lolwut"));
+        assertThat(response.getResponseHeaderValue("Content-Security-Policy"), containsString("default-src 'none';"));
+        assertThat(response.getResponseHeaderValue("X-Content-Security-Policy"), containsString("default-src 'none';"));
+        assertThat(response.getResponseHeaderValue("X-WebKit-CSP"), containsString("default-src 'none';"));
     }
 }

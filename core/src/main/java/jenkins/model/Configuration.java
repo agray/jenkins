@@ -24,20 +24,23 @@
 package jenkins.model;
 
 import hudson.model.Hudson;
+import jenkins.util.SystemProperties;
 
-
+/**
+ * @deprecated use {@link SystemProperties} directly
+ */
+@Deprecated
 public class Configuration {
 
     public static boolean getBooleanConfigParameter(String name, boolean defaultValue) {
         String value = getStringConfigParameter(name,null);
-        return (value==null)?defaultValue:Boolean.valueOf(value);
+        return value == null ? defaultValue : Boolean.parseBoolean(value);
     }
 
     public static String getStringConfigParameter(String name, String defaultValue) {
-        String value = System.getProperty(Jenkins.class.getName()+"." + name);
+        String value = SystemProperties.getString(Jenkins.class.getName()+"." + name);
         if( value == null )
-            value = System.getProperty(Hudson.class.getName()+"." + name);
-        return (value==null)?defaultValue:value;
+            value = SystemProperties.getString(Hudson.class.getName()+"." + name);
+        return value == null ? defaultValue : value;
     }
 }
-

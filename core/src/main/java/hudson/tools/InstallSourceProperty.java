@@ -24,13 +24,13 @@
 package hudson.tools;
 
 import hudson.Extension;
-import hudson.util.DescribableList;
 import hudson.model.Descriptor;
 import hudson.model.Saveable;
-import org.kohsuke.stapler.DataBoundConstructor;
-
-import java.util.List;
+import hudson.util.DescribableList;
 import java.io.IOException;
+import java.util.List;
+import org.jenkinsci.Symbol;
+import org.kohsuke.stapler.DataBoundConstructor;
 
 /**
  * {@link ToolProperty} that shows auto installation options.
@@ -41,7 +41,7 @@ import java.io.IOException;
 public class InstallSourceProperty extends ToolProperty<ToolInstallation> {
     // TODO: get the proper Saveable
     public final DescribableList<ToolInstaller, Descriptor<ToolInstaller>> installers =
-            new DescribableList<ToolInstaller, Descriptor<ToolInstaller>>(Saveable.NOOP);
+            new DescribableList<>(Saveable.NOOP);
 
     @DataBoundConstructor
     public InstallSourceProperty(List<? extends ToolInstaller> installers) throws IOException {
@@ -57,12 +57,14 @@ public class InstallSourceProperty extends ToolProperty<ToolInstallation> {
             installer.setTool(t);
     }
 
+    @Override
     public Class<ToolInstallation> type() {
         return ToolInstallation.class;
     }
 
-    @Extension
+    @Extension @Symbol("installSource")
     public static class DescriptorImpl extends ToolPropertyDescriptor {
+        @Override
         public String getDisplayName() {
             return Messages.InstallSourceProperty_DescriptorImpl_displayName();
         }

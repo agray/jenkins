@@ -1,8 +1,11 @@
 package hudson;
 
-import jenkins.model.Jenkins;
-import hudson.model.Node;
+import edu.umd.cs.findbugs.annotations.NonNull;
+import hudson.model.AbstractBuild;
+import hudson.model.BuildListener;
 import hudson.model.Executor;
+import hudson.model.Node;
+import hudson.model.TaskListener;
 import hudson.tasks.BuildWrapper;
 
 /**
@@ -31,20 +34,21 @@ public abstract class LauncherDecorator implements ExtensionPoint {
      * decoration, see {@link BuildWrapper#decorateLauncher(AbstractBuild, Launcher, BuildListener)} as well.
      *
      * @param launcher
-     *      The base launcher that you can decorate. Never null.
+     *      The base launcher that you can decorate.
      * @param node
-     *      Node for which this launcher is created. Never null.
+     *      Node for which this launcher is created.
      * @return
-     *      Never null. Return the 'launcher' parameter to do no-op.
+     *      Return the 'launcher' parameter to do no-op.
      * @see Launcher#decorateFor(Node)
      * @see Launcher#decorateByPrefix(String[])
      */
-    public abstract Launcher decorate(Launcher launcher, Node node);
+    @NonNull
+    public abstract Launcher decorate(@NonNull Launcher launcher, @NonNull Node node);
 
     /**
      * Returns all the registered {@link LauncherDecorator}s.
      */
     public static ExtensionList<LauncherDecorator> all() {
-        return Jenkins.getInstance().getExtensionList(LauncherDecorator.class);
+        return ExtensionList.lookup(LauncherDecorator.class);
     }
 }
