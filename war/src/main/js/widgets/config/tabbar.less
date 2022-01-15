@@ -97,6 +97,13 @@
   }
 
 }
+
+#jenkins .jenkins-config-container {
+  width: 100vw;
+  max-width: calc(var(--form-item-max-width) + 20px);
+  margin: auto;
+}
+
 #jenkins{
   .jenkins-config {
     border:1px solid var(--input-border);
@@ -190,11 +197,6 @@
           right:0;
           z-index:2;
         }
-      }
-
-      // Help & descriptions
-      .help {
-        background: var(--configure-job-help-area-bg-color);
       }
 
       p,

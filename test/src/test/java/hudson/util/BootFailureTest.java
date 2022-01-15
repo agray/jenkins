@@ -46,7 +46,7 @@ public class BootFailureTest {
 
     static class CustomRule extends JenkinsRule {
         @Override
-        public void before() throws Throwable {
+        public void before() {
             env = new TestEnvironment(testDescription);
             env.pin();
             // don't let Jenkins start automatically
@@ -75,7 +75,7 @@ public class BootFailureTest {
                 if (noListenerConfiguration != null) {
                     context.removeBean(noListenerConfiguration);
                     context.addBean(new AbstractLifeCycle() {
-                        @Override 
+                        @Override
                         protected void doStart() {
                             // default behavior of noListenerConfiguration
                             context.setEventListeners(null);
@@ -94,6 +94,7 @@ public class BootFailureTest {
             return null;    // didn't boot
         }
     }
+
     @Rule
     public CustomRule j = new CustomRule();
 
@@ -164,6 +165,7 @@ public class BootFailureTest {
         j.newHudson();
         assertEquals(Collections.singletonList("1"), runRecord);
     }
+
     @TestExtension("interruptedStartup")
     public static class PauseBoot extends ItemListener {
         @Override
